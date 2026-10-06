@@ -20,6 +20,10 @@ vi.mock("@/lib/api/services/children.service", () => ({
   fetchChildren: vi.fn(),
 }));
 
+vi.mock("@/lib/api/services/exports.service", () => ({
+  exportSchoolChildren: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock("react-hot-toast", () => ({
   default: { success: vi.fn(), error: vi.fn() },
 }));
@@ -28,6 +32,7 @@ import { fetchSchoolClasses } from "@/lib/api/services/structure.service";
 import { fetchBuckets } from "@/lib/api/services/buckets.service";
 import { fetchChildren } from "@/lib/api/services/children.service";
 import toast from "react-hot-toast";
+import { exportSchoolChildren } from "@/lib/api/services/exports.service";
 
 const MOCK_CLASS: SchoolClassItem = {
   schoolClassId: 1,
@@ -241,7 +246,10 @@ describe("ChildrenTab — F-M6-7", () => {
 
     await waitFor(() => expect(screen.getAllByRole("button").length).toBe(baselineButtons + 1));
 
-    const clearButton = screen.getAllByRole("button")[1];
+    // Scope to the search field — header buttons (Export CSV, Enroll Child) shift global indexes.
+    const clearButton = within(searchBox.closest(".MuiInputBase-root") as HTMLElement).getByRole(
+      "button"
+    );
     await userEvent.click(clearButton);
 
     expect(searchBox).toHaveValue("");
@@ -346,6 +354,76 @@ describe("ChildrenTab — F-M6-7", () => {
       ).toBeInTheDocument()
     );
 
+    expect(screen.queryByRole("button", { name: "Enroll Child" })).not.toBeInTheDocument();
+  });
+
+  // ── F-M9-2 Export CSV ────────────────────────────────────────────────────────
+
+  it("test_export_button_sends_current_filters", async () => {
+    vi.mocked(fetchChildren).mockResolvedValue([
+      makeChild(1, "Asha", null),
+      { ...makeChild(2, "Kiran", null), isActive: false },
+    ]);
+
+    render(<ChildrenTab schoolId={580} activeYear="2026-2027" />);
+    await waitFor(() => expect(screen.getByText("Asha Test")).toBeInTheDocument());
+
+    // Bucket filter → Unassigned, status tab → All
+    const selects = screen.getAllByRole("combobox");
+    await userEvent.click(selects[selects.length - 1]);
+    await userEvent.click(await screen.findByRole("option", { name: "Unassigned" }));
+    await userEvent.click(screen.getByText("All"));
+
+    const exportButton = screen.getByRole("button", { name: /export csv/i });
+    await waitFor(() => expect(exportButton).not.toBeDisabled());
+    await userEvent.click(exportButton);
+
+    await waitFor(() =>
+      expect(exportSchoolChildren).toHaveBeenCalledWith(580, {
+        status: "all",
+        search: "",
+        classId: null,
+        sectionId: null,
+        unassigned: true,
+      })
+    );
+  });
+
+  it("test_export_button_sends_specific_bucket_as_section_id", async () => {
+    vi.mocked(fetchChildren).mockResolvedValue([
+      makeChild(1, "Asha", {
+        classSectionId: 10,
+        sectionDisplayName: "Group 1",
+        sectionName: "group_1",
+      }),
+    ]);
+
+    render(<ChildrenTab schoolId={580} activeYear="2026-2027" />);
+    await waitFor(() => expect(screen.getByText("Asha Test")).toBeInTheDocument());
+
+    const selects = screen.getAllByRole("combobox");
+    await userEvent.click(selects[selects.length - 1]);
+    await userEvent.click(await screen.findByRole("option", { name: "Group 1" }));
+
+    const exportButton = screen.getByRole("button", { name: /export csv/i });
+    await waitFor(() => expect(exportButton).not.toBeDisabled());
+    await userEvent.click(exportButton);
+
+    await waitFor(() =>
+      expect(exportSchoolChildren).toHaveBeenCalledWith(
+        580,
+        expect.objectContaining({ status: "active", sectionId: 10, unassigned: false })
+      )
+    );
+  });
+
+  it("test_export_button_visible_without_modify_permission", async () => {
+    vi.mocked(fetchChildren).mockResolvedValue([makeChild(1, "Asha", null)]);
+
+    render(<ChildrenTab schoolId={580} activeYear="2026-2027" canModify={false} />);
+
+    await waitFor(() => expect(screen.getByText("Asha Test")).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: /export csv/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Enroll Child" })).not.toBeInTheDocument();
   });
 });

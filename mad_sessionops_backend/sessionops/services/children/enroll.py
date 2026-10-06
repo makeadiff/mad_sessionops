@@ -14,12 +14,12 @@ from sessionops.models import (
     ClassSectionSubject,
     Partner,
     Program,
-    SchoolAcademicYear,
     SchoolClass,
     User,
 )
 from sessionops.schemas.children import ChildEnrollIn
-from sessionops.services.structure.queries import assert_class_not_blocked_for_assignment
+from sessionops.services.academic_year.queries import get_or_create_school_academic_year
+from sessionops.services.catalog.rules import assert_class_open_for_enrolment
 
 MAX_CHILDREN_PER_SECTION = 5
 
@@ -66,9 +66,7 @@ def enroll_child(school_id: int, payload: ChildEnrollIn, user: User) -> Child:
         except SchoolClass.DoesNotExist:
             raise NotFound(f"School class {payload.school_class_id} not found.")
 
-        assert_class_not_blocked_for_assignment(
-            school_class.class_id.class_code, school_class.class_id.class_name
-        )
+        assert_class_open_for_enrolment(school_class.class_id)
 
         # 2. If a bucket is given, lock + validate + capacity check (R1). Bucket
         # assignment is optional at enrollment (M6 decision #9).
@@ -109,15 +107,11 @@ def enroll_child(school_id: int, payload: ChildEnrollIn, user: User) -> Child:
             if active_count >= partner.confirmed_child_count:
                 raise ConflictError("School has reached its confirmed child limit.")
 
-        # 4. Resolve SchoolAcademicYear
-        try:
-            say = SchoolAcademicYear.objects.get(
-                school_id=school_id,
-                is_active=True,
-                removed=False,
-            )
-        except SchoolAcademicYear.DoesNotExist:
-            raise ConflictError("No active academic year binding found for this school.")
+        # 4. Resolve the school's single active school-year (F-M10-2); a school with
+        # none yet gets one for the global active year, like every other first write.
+        say = get_or_create_school_academic_year(school_id, user)
+        if school_class.school_academic_year_id_id != say.school_academic_year_id:
+            raise ValidationError("This class is not part of the school's current academic year.")
 
         # 5. Create Child
         child = Child.objects.create(

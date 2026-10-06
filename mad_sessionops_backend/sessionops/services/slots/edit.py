@@ -5,6 +5,7 @@ from django.db.models import Q
 
 from sessionops.exceptions import ConflictError, NotFound, PermissionDenied, ValidationError
 from sessionops.models import Slot
+from sessionops.services.academic_year.queries import current_year_q
 from sessionops.services.rbac.scope import can_modify_school, get_school_or_403
 
 
@@ -32,9 +33,10 @@ def edit_slot(
     if new_start >= new_end:
         raise ValidationError("start_time must be before end_time.")
 
-    # R7: overlap check excluding self
+    # R7: overlap check excluding self — current school-year only (F-M10-3)
     overlapping = (
         Slot.objects.filter(
+            current_year_q(),
             school_id=slot.school_id,
             day_of_week=new_day,
             is_active=True,

@@ -684,7 +684,10 @@ def get_my_permissions(request, school_id: int):
     except Partner.DoesNotExist:
         raise NotFound(f"School {school_id} not found.")
 
+    from sessionops.services.progression.freeze import is_school_frozen
+
+    frozen = is_school_frozen(school_id)  # F-M10-5: read-only while progressing
     return PermissionsResponseSchema(
         can_view=can_view_school(caller, partner),
-        can_modify=can_modify_school(caller, partner),
+        can_modify=can_modify_school(caller, partner) and not frozen,
     )

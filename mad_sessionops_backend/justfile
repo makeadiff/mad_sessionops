@@ -40,9 +40,11 @@ shell:
 makemigrations app="sessionops":
     uv run python manage.py makemigrations {{app}}
 
-# Apply migrations (uses DBADMINUSER/DBADMINPASSWORD for DDL rights)
+# Apply migrations (uses DBADMINUSER/DBADMINPASSWORD for DDL rights), then hand
+# any table the admin just created back to DBUSER so the app user owns every table.
 migrate:
     uv run python manage.py migrate --database migrate
+    uv run python manage.py fix_table_ownership
 
 # Seed M2 catalog data (academic year, program, class catalog) — run after migrate
 seed-m2:

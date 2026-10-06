@@ -1,4 +1,10 @@
-import axios, { AxiosInstance, AxiosError, InternalAxiosRequestConfig, AxiosResponse } from "axios";
+import axios, {
+  AxiosInstance,
+  AxiosError,
+  AxiosRequestConfig,
+  InternalAxiosRequestConfig,
+  AxiosResponse,
+} from "axios";
 import { getAccessToken, getRefreshToken, storeDispatch } from "@/lib/redux/storeAccessor";
 import { setAuthCookie, clearAuthCookie } from "@/lib/auth/cookieUtils";
 
@@ -53,6 +59,21 @@ const apiClient: AxiosInstance = axios.create({
 // REQUEST INTERCEPTOR
 // ============================================================================
 
+/** Request config plus the fields the interceptors attach. */
+type TrackedConfig = InternalAxiosRequestConfig & {
+  metadata?: { startTime: number };
+  _retry?: boolean;
+};
+
+/** Error bodies the backend may return (Ninja `detail`, or our envelopes). */
+type ErrorBody = {
+  detail?: string;
+  message?: string;
+  code?: string;
+  errors?: unknown;
+  error?: { message?: string };
+};
+
 apiClient.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
     // Read token from Redux store (single source of truth).
@@ -69,7 +90,7 @@ apiClient.interceptors.request.use(
       config.headers["Accept-Language"] = navigator.language;
     }
 
-    (config as any).metadata = { startTime: Date.now() };
+    (config as TrackedConfig).metadata = { startTime: Date.now() };
 
     if (process.env.NODE_ENV === "development") {
       console.group(`🚀 API Request: ${config.method?.toUpperCase()} ${config.url}`);
@@ -96,7 +117,7 @@ apiClient.interceptors.request.use(
 
 apiClient.interceptors.response.use(
   (response: AxiosResponse) => {
-    const config = response.config as any;
+    const config = response.config as TrackedConfig;
     if (config.metadata?.startTime) {
       const duration = Date.now() - config.metadata.startTime;
       if (duration > 3000) console.warn(`⚠️ Slow API request (${duration}ms):`, config.url);
@@ -110,7 +131,7 @@ apiClient.interceptors.response.use(
   },
 
   async (error: AxiosError) => {
-    const config = error.config as any;
+    const config = error.config as TrackedConfig;
     const response = error.response;
 
     if (process.env.NODE_ENV === "development" && config?.metadata?.startTime) {
@@ -159,7 +180,7 @@ apiClient.interceptors.response.use(
 
       if (isPublicAuthEndpoint) {
         // Pass the backend message straight through — no redirect, no refresh.
-        const errorData = response.data as any;
+        const errorData = response.data as ErrorBody | undefined;
         return Promise.reject({
           message: extractMessage(errorData) || "Authentication failed.",
           code: "AUTH_ERROR",
@@ -252,7 +273,7 @@ apiClient.interceptors.response.use(
     }
 
     if (response.status === 404) {
-      const errorData = response.data as any;
+      const errorData = response.data as ErrorBody | undefined;
       return Promise.reject({
         message: extractMessage(errorData) || "The requested resource was not found.",
         code: "NOT_FOUND",
@@ -262,7 +283,7 @@ apiClient.interceptors.response.use(
     }
 
     if (response.status === 422) {
-      const errorData = response.data as any;
+      const errorData = response.data as ErrorBody | undefined;
       return Promise.reject({
         message: extractMessage(errorData) || "Validation error",
         code: "VALIDATION_ERROR",
@@ -291,7 +312,7 @@ apiClient.interceptors.response.use(
       });
     }
 
-    const errorData = response.data as any;
+    const errorData = response.data as ErrorBody | undefined;
     return Promise.reject({
       message: extractMessage(errorData) || "An unexpected error occurred",
       code: errorData?.code || "UNKNOWN_ERROR",
@@ -315,7 +336,7 @@ function generateRequestId(): string {
  * Django Ninja's HttpError returns { detail: "..." }.
  * Custom error envelopes may use { message: "..." } or { error: { message: "..." } }.
  */
-function extractMessage(data: any): string | undefined {
+function extractMessage(data: ErrorBody | undefined): string | undefined {
   if (!data) return undefined;
   return data.detail ?? data.message ?? data.error?.message ?? undefined;
 }
@@ -324,27 +345,39 @@ function extractMessage(data: any): string | undefined {
 // API CLIENT METHODS
 // ============================================================================
 
-export async function get<T = any>(url: string, config?: any): Promise<T> {
+export async function get<T = unknown>(url: string, config?: AxiosRequestConfig): Promise<T> {
   return (await apiClient.get<T>(url, config)).data;
 }
 
-export async function post<T = any>(url: string, data?: any, config?: any): Promise<T> {
+export async function post<T = unknown>(
+  url: string,
+  data?: unknown,
+  config?: AxiosRequestConfig
+): Promise<T> {
   return (await apiClient.post<T>(url, data, config)).data;
 }
 
-export async function put<T = any>(url: string, data?: any, config?: any): Promise<T> {
+export async function put<T = unknown>(
+  url: string,
+  data?: unknown,
+  config?: AxiosRequestConfig
+): Promise<T> {
   return (await apiClient.put<T>(url, data, config)).data;
 }
 
-export async function patch<T = any>(url: string, data?: any, config?: any): Promise<T> {
+export async function patch<T = unknown>(
+  url: string,
+  data?: unknown,
+  config?: AxiosRequestConfig
+): Promise<T> {
   return (await apiClient.patch<T>(url, data, config)).data;
 }
 
-export async function del<T = any>(url: string, config?: any): Promise<T> {
+export async function del<T = unknown>(url: string, config?: AxiosRequestConfig): Promise<T> {
   return (await apiClient.delete<T>(url, config)).data;
 }
 
-export async function upload<T = any>(
+export async function upload<T = unknown>(
   url: string,
   file: File,
   onProgress?: (progress: number) => void
@@ -362,14 +395,71 @@ export async function upload<T = any>(
   ).data;
 }
 
-export async function download(url: string, filename: string): Promise<void> {
-  const response = await apiClient.get(url, { responseType: "blob" });
-  const blob = new Blob([response.data]);
+/** Shape the response interceptor rejects with. */
+export interface ApiRejection {
+  message: string;
+  code: string;
+  status?: number;
+  data?: unknown;
+}
+
+/**
+ * Read `filename="..."` from a Content-Disposition header (backend must expose
+ * it via CORS_EXPOSE_HEADERS for cross-origin requests).
+ */
+export function filenameFromDisposition(header: string | undefined): string | undefined {
+  if (!header) return undefined;
+  const match = /filename="?([^";]+)"?/i.exec(header);
+  return match?.[1];
+}
+
+/**
+ * GET a file and save it via a temporary link. Errors keep the interceptor's
+ * shape; for blob responses the JSON error body is parsed so `message`
+ * carries the backend's text.
+ */
+export async function download(
+  url: string,
+  fallbackFilename: string,
+  params?: Record<string, unknown>
+): Promise<void> {
+  let response: AxiosResponse<Blob>;
+  try {
+    response = await apiClient.get<Blob>(url, {
+      params,
+      responseType: "blob",
+      headers: { Accept: "text/csv, application/json" },
+    });
+  } catch (caught) {
+    const error = caught as ApiRejection;
+    // 403 and 5xx keep the interceptor's generic message, same as JSON requests.
+    const status = error?.status ?? 0;
+    if (error?.data instanceof Blob && status !== 403 && status < 500) {
+      try {
+        const body = JSON.parse(await error.data.text());
+        error.message = extractMessage(body) || error.message;
+        error.data = body;
+      } catch {
+        // Non-JSON error body — keep the interceptor's message.
+      }
+    }
+    throw error;
+  }
+
+  const filename =
+    filenameFromDisposition(response.headers?.["content-disposition"]) || fallbackFilename;
+  const blob = new Blob([response.data], {
+    type: response.headers?.["content-type"] || "text/csv;charset=utf-8",
+  });
+  const href = window.URL.createObjectURL(blob);
   const link = document.createElement("a");
-  link.href = window.URL.createObjectURL(blob);
+  link.href = href;
   link.download = filename;
+  document.body.appendChild(link);
   link.click();
-  window.URL.revokeObjectURL(link.href);
+  link.remove();
+  // Revoke after the click has been handled, or some browsers cancel the download.
+  setTimeout(() => window.URL.revokeObjectURL(href), 0);
 }
 
 export const api = { get, post, put, patch, delete: del, upload, download };

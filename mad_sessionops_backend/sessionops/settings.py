@@ -70,6 +70,8 @@ CORS_ALLOWED_ORIGINS = [
     ).split(",")
     if o.strip()
 ]
+# Let the browser read the CSV filename on cross-origin downloads (M9 exports)
+CORS_EXPOSE_HEADERS = ["Content-Disposition"]
 CORS_ALLOW_METHODS = [
     "GET",
     "POST",
@@ -123,6 +125,8 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    # F-M10-5: 409 on user writes to a school that is being progressed
+    "sessionops.middleware.progression_freeze.ProgressionFreezeMiddleware",
     "django_prometheus.middleware.PrometheusAfterMiddleware",
 ]
 

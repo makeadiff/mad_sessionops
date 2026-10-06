@@ -15,14 +15,14 @@ from sessionops.models import (
     ClassSection,
     ClassSectionSubject,
     Partner,
-    SchoolAcademicYear,
     SchoolClass,
     User,
 )
 from sessionops.schemas.children import ReactivateIn
+from sessionops.services.academic_year.queries import get_or_create_school_academic_year
+from sessionops.services.catalog.rules import assert_class_open_for_enrolment
 from sessionops.services.children.enroll import MAX_CHILDREN_PER_SECTION, get_foundation_program_id
 from sessionops.services.rbac.scope import get_school_or_403
-from sessionops.services.structure.queries import assert_class_not_blocked_for_assignment
 
 
 def reactivate_child(child_id: int, payload: ReactivateIn, user: User) -> Child:
@@ -52,18 +52,22 @@ def reactivate_child(child_id: int, payload: ReactivateIn, user: User) -> Child:
         except SchoolClass.DoesNotExist:
             raise NotFound(f"School class {payload.school_class_id} not found.")
 
-        # A blocked class (e.g. 8) is only reachable via year-end progression —
-        # UNLESS this child is being restored into the exact class they were
-        # already in before deactivation (their most recent ChildClass row,
-        # soft-deleted by deactivate_child but never hard-deleted). That's a
-        # restoration of their own history, not a new manual assignment.
+        # A class closed for enrolment (e.g. 8th) is only reachable via year-end
+        # progression — UNLESS this child is being restored into the class they were
+        # already in before deactivation (their most recent ChildClass row). Compared
+        # by catalog class, not SchoolClass id: after year progression the prior
+        # SchoolClass row belongs to an archived year (F-M10-1/2).
         prior_cc = (
-            ChildClass.objects.filter(child_id=child.child_id).order_by("-child_class_id").first()
+            ChildClass.objects.filter(child_id=child.child_id)
+            .select_related("school_class_id")
+            .order_by("-child_class_id")
+            .first()
         )
-        if prior_cc is None or prior_cc.school_class_id_id != school_class.school_class_id:
-            assert_class_not_blocked_for_assignment(
-                school_class.class_id.class_code, school_class.class_id.class_name
-            )
+        is_prior_class = (
+            prior_cc is not None
+            and prior_cc.school_class_id.class_id_id == school_class.class_id_id
+        )
+        assert_class_open_for_enrolment(school_class.class_id, allow_prior=is_prior_class)
 
         # 4. If a bucket is given, lock + validate + capacity check (R1). Bucket
         # assignment is optional on reactivation, same as enrollment.
@@ -103,13 +107,11 @@ def reactivate_child(child_id: int, payload: ReactivateIn, user: User) -> Child:
         child.updated_by = user
         child.save(update_fields=["is_active", "updated_by_id", "updated_at"])
 
-        # 7. Resolve active SchoolAcademicYear for this school
-        try:
-            say = SchoolAcademicYear.objects.get(
-                school_id=child.school_id, is_active=True, removed=False
-            )
-        except SchoolAcademicYear.DoesNotExist:
-            raise ConflictError("No active academic year binding found for this school.")
+        # 7. Resolve the school's single active school-year (F-M10-2). The child is
+        # placed in the CURRENT year, even if their prior class row is in an archived one.
+        say = get_or_create_school_academic_year(child.school_id, user)
+        if school_class.school_academic_year_id_id != say.school_academic_year_id:
+            raise ValidationError("This class is not part of the school's current academic year.")
 
         # 8. Always recreate ChildClass from payload.school_class_id
         ChildClass.objects.create(

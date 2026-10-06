@@ -12,6 +12,7 @@ import Button from "@mui/material/Button";
 import { Search, X, ArrowUpDown, Check } from "lucide-react";
 import { colors } from "@/config/design-tokens";
 import { describeSortOption, type SortOption } from "@/lib/api/services/schools.service";
+import { ExportButton, type ExportOption } from "@/components/ui/ExportButton";
 
 // Curated quick presets for the dropdown, with their original labels
 // preserved. Any other column/direction is reachable by clicking a table
@@ -33,9 +34,17 @@ interface SchoolToolbarProps {
   onSearchChange: (v: string) => void;
   sort: SortOption;
   onSortChange: (v: SortOption) => void;
+  /** M9 cross-school CSV exports; the Export control is hidden when omitted. */
+  exportOptions?: ExportOption[];
 }
 
-export function SchoolToolbar({ search, onSearchChange, sort, onSortChange }: SchoolToolbarProps) {
+export function SchoolToolbar({
+  search,
+  onSearchChange,
+  sort,
+  onSortChange,
+  exportOptions,
+}: SchoolToolbarProps) {
   const [anchorEl, setAnchorEl] = useState<HTMLButtonElement | null>(null);
   const sortBtnRef = useRef<HTMLButtonElement>(null);
 
@@ -129,6 +138,10 @@ export function SchoolToolbar({ search, onSearchChange, sort, onSortChange }: Sc
           </MenuItem>
         ))}
       </Popover>
+
+      {exportOptions && exportOptions.length > 0 && (
+        <ExportButton label="Export" options={exportOptions} />
+      )}
     </Box>
   );
 }

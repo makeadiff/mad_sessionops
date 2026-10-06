@@ -5,26 +5,23 @@ from django.db.models import OuterRef, Q, QuerySet, Subquery
 from sessionops.models import Child, ChildClass, ChildClassSection
 
 
-def list_children(
-    school_id: int,
-    *,
-    section_id: int | None = None,
-    class_id: int | None = None,
-    status: str = "active",
-    search: str | None = None,
-    unassigned: bool = False,
-) -> QuerySet[Child]:
-    qs = Child.objects.filter(school_id=school_id)
-
+def filter_child_status(qs: QuerySet[Child], status: str) -> QuerySet[Child]:
+    """'active' / 'inactive' (deactivated, not hard-deleted) / 'all' (never removed=True)."""
     if status == "active":
-        qs = qs.filter(is_active=True, removed=False)
-    elif status == "inactive":
-        qs = qs.filter(is_active=False, removed=False)  # deactivated, not hard-deleted
-    else:  # "all"
-        qs = qs.filter(removed=False)
+        return qs.filter(is_active=True, removed=False)
+    if status == "inactive":
+        # deactivated, not hard-deleted
+        return qs.filter(is_active=False, removed=False)
+    return qs.filter(removed=False)  # "all"
 
-    # Annotate current section name and class name from active assignments
-    qs = qs.annotate(
+
+def annotate_current_placement(qs: QuerySet[Child]) -> QuerySet[Child]:
+    """Annotate current section name and class name from active assignments.
+
+    Shared by list_children (Children tab) and the M9 exports so every surface
+    derives class/bucket placement the same way.
+    """
+    return qs.annotate(
         current_section_name=Subquery(
             ChildClassSection.objects.filter(
                 child_id=OuterRef("pk"), is_active=True, removed=False
@@ -52,6 +49,19 @@ def list_children(
             ).values("school_class_id")[:1]
         ),
     )
+
+
+def list_children(
+    school_id: int,
+    *,
+    section_id: int | None = None,
+    class_id: int | None = None,
+    status: str = "active",
+    search: str | None = None,
+    unassigned: bool = False,
+) -> QuerySet[Child]:
+    qs = filter_child_status(Child.objects.filter(school_id=school_id), status)
+    qs = annotate_current_placement(qs)
 
     if unassigned:
         qs = qs.filter(_current_section_id__isnull=True)

@@ -21,6 +21,17 @@ class SchoolHoliday(models.Model):
 
     school_holiday_id = models.BigAutoField(primary_key=True)
     school_id = models.BigIntegerField(db_index=True)
+    # F-M10-4: the school-year this holiday belongs to. Year progression doesn't
+    # archive holidays; reads filter to the school's active school-year, so old
+    # ones drop out of view. Null = legacy row (kept visible as a fallback).
+    school_academic_year_id = models.ForeignKey(
+        "SchoolAcademicYear",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        db_column="school_academic_year_id",
+        related_name="+",
+    )
     holiday_reason = models.CharField(max_length=50, choices=HOLIDAY_REASONS)
     start_date = models.DateField()
     end_date = models.DateField()

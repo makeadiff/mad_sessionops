@@ -32,10 +32,13 @@ from pydantic import ValidationError as PydanticValidationError
 
 from sessionops import auth
 from sessionops.api.academic_years_api import academic_years_router
+from sessionops.api.admin_classes_api import admin_classes_router
+from sessionops.api.admin_progression_api import admin_progression_router
 from sessionops.api.admin_realtime_events_api import admin_realtime_events_router
 from sessionops.api.admin_sync_api import admin_sync_router
 from sessionops.api.auth_api import auth_router
 from sessionops.api.children_api import children_router
+from sessionops.api.exports_api import exports_router, school_exports_router
 from sessionops.api.holidays_api import holidays_router
 from sessionops.api.migration_api import router as migration_router
 from sessionops.api.partner_sync_internal_api import router as partner_sync_internal_router
@@ -221,7 +224,14 @@ def not_found_handler(request, exc: NotFound):
 def conflict_error_handler(request, exc: ConflictError):
     _report_to_sentry(request, exc, 409)
     return JsonResponse(
-        {"error": {"code": "conflict", "message": exc.message}},
+        # A specific error_code (e.g. "undo_not_allowed", M10) passes through; the
+        # default "CONFLICT" keeps the long-standing "conflict" code.
+        {
+            "error": {
+                "code": "conflict" if exc.error_code == "CONFLICT" else exc.error_code,
+                "message": exc.message,
+            }
+        },
         status=409,
     )
 
@@ -284,8 +294,18 @@ api.add_router("/api/schools/", sessions_router)
 # Holidays (school-scoped: CRUD within session window)
 api.add_router("/api/schools/", holidays_router)
 
+# M9 CSV exports (per-school: /api/schools/{id}/exports/*; cross-school: /api/exports/*)
+api.add_router("/api/schools/", school_exports_router)
+api.add_router("/api/exports/", exports_router)
+
 # Admin sync dashboard (admin-only read endpoints)
 api.add_router("/api/admin/", admin_sync_router)
+
+# Admin → Classes: class catalog management (F-M10-1)
+api.add_router("/api/admin/classes/", admin_classes_router)
+
+# Admin → Year Progression (M10)
+api.add_router("/api/admin/progression/", admin_progression_router)
 
 # Admin realtime events — list, detail, manual sync trigger
 api.add_router("/api/admin/realtime-events", admin_realtime_events_router)

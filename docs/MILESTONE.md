@@ -49,7 +49,9 @@ If any of those fail, the milestone is not done. Don't move to the next mileston
 | M2 | School Structure + Children | Academic year, classes, sections, children CRUD | 9 | In progress — backend + frontend complete; production deploy pending | `docs/milestones/M2.md` |
 | M3 | Volunteers + Scheduling | Volunteer assignments, slots, slot-classes, schedule validation | 10 | Not started | Written at M3 start |
 | M4 | Calendar + Ops + Webhook Sync | Session dates, holidays, deactivation alerts, Hasura webhooks | 6 | Not started | Written at M4 start |
-| M5 | Activation, Polish, Admin Ops | Google OAuth, sync admin dashboard, year progression, setup checklist, cross-school conflict, Celery+Redis | 12 | Not started | Written at M5 start |
+| M5 | Activation, Polish, Admin Ops | Google OAuth, sync admin dashboard, setup checklist, cross-school conflict, Celery+Redis (year progression moved to M10) | 10 | Not started | Written at M5 start |
+| M9 | CSV Data Export for Ops | Per-school rosters and timetable, schools summary, cross-school children/volunteers, ops gap report, export audit log | 8 | Features complete and verified (2026-09-28); commit and deploy pending | `docs/milestones/M9.md` |
+| M10 | Year Progression | Admin class catalog (next class, enrolment toggle), one active year per school, reads scoped to the school's year, holiday year link, precheck/preview/run/undo wizard | 9 | Features complete (2026-09-30); commit, migrations and prod-copy dry run pending | `docs/milestones/M10.md` |
 
 **Total expected duration:** 10 weeks of build + stabilization. Each milestone's start date is "when the previous milestone ships," not a fixed calendar date. M5 may run slightly longer (2-2.5 weeks) given its size; build at the pace M1-M4 actually takes.
 
@@ -239,8 +241,7 @@ If any of those fail, the milestone is not done. Don't move to the next mileston
 - **F-M5-2** Sync admin dashboard — see sync run history, status, counts, errors
 - **F-M5-3** Manual sync trigger UI — "Sync now" button for admins
 - **F-M5-4** Sync health alerts — Sentry/email if sync fails N times in a row
-- **F-M5-6** Year progression workflow — promote children at end of year, archive old data
-- **F-M5-7** Year progression preview — show what will change before committing
+- ~~**F-M5-6** Year progression workflow~~ and ~~**F-M5-7** Year progression preview~~: **moved to M10** (2026-09-28); see `docs/milestones/M10.md`
 - **F-M5-8** Volunteer-deactivation admin alerts — admin sees impacted assignments when a volunteer's user record deactivates
 - **F-M5-10** Celery + Redis introduction — replace cron-based sync with proper async queue
 
@@ -248,7 +249,7 @@ If any of those fail, the milestone is not done. Don't move to the next mileston
 
 - Google OAuth (full flow, frontend reactivated)
 - Sync admin UI for monitoring and manual triggers
-- Year progression flow
+- ~~Year progression flow~~ (moved to M10)
 - Celery and Redis for queueing
 - All deferred UX polish: setup checklist, tab visuals, conflict detection
 
@@ -260,16 +261,66 @@ If any of those fail, the milestone is not done. Don't move to the next mileston
 
 ## Open questions to resolve at M5 start
 
-- Year progression — does it run automatically on a date, or always manual trigger?
+- ~~Year progression — does it run automatically on a date, or always manual trigger?~~ Resolved in M10: always a manual admin action.
 - Hosted-domain restriction on Google OAuth — restrict to `@makeadiff.in` only, or allow any verified domain?
 - Should sync dashboard show field-level diffs (already captured in M4's sync diff feature), or just per-run aggregate counts?
 - Cross-school conflict — hard block on save, or warning that lets the CO continue?
 
 ## Note on M5 size
 
-M5 has 12 features — heaviest milestone in this plan. That's the trade-off for ruthlessly deferring polish through M1-M4. By the time M5 starts, you'll have 4 milestones of velocity data and can pace this realistically. M5 may take 2.5 weeks instead of 2; that's expected.
+M5 has 10 features after year progression moved to M10 (2026-09-28); it was the heaviest milestone in this plan. That's the trade-off for ruthlessly deferring polish through M1-M4. By the time M5 starts, you'll have 4 milestones of velocity data and can pace this realistically. M5 may take 2.5 weeks instead of 2; that's expected.
 
 > **Detailed M5 spec:** Written when M5 begins.
+
+---
+
+# Milestone 9 — CSV Data Export for Ops
+
+**Status:** Features complete and verified (2026-09-28). Commit and deploy are pending.
+**Production goal:** Any ops user (CO, CHO, admin) can download CSVs of the data they can already see, and every export is audited.
+
+## Features
+
+- **F-M9-1** Export foundation: CSV builder, `ExportLog` audit table, shared Export button
+- **F-M9-2** School children roster export (Children tab)
+- **F-M9-3** School volunteer roster export (Volunteers tab)
+- **F-M9-4** School timetable export (Slots tab)
+- **F-M9-5** Schools summary export (Schools list)
+- **F-M9-6** All children in scope export (Schools list)
+- **F-M9-7** All volunteers in scope export (Schools list)
+- **F-M9-8** Ops gap report (Schools list)
+
+## Major out-of-scope items
+
+- Excel/PDF output, scheduled or emailed exports, past academic years, a column picker, import from CSV
+- Admin UI for the export audit log, and a log retention policy
+
+> **Detailed M9 spec:** `docs/milestones/M9.md`. Key decisions are in `DECISIONS.md` D031.
+
+---
+
+# Milestone 10 — Year Progression
+
+**Status:** Features complete (2026-09-30); commit, migrations and prod-copy dry run pending
+**Production goal:** An admin moves schools into the next academic year in 3–4 clicks, with no developer and no code change, year after year. Children move to each class's admin-set next class and keep their mentoring circles; timetables and term dates are archived for COs to rebuild.
+
+## Features
+
+- **F-M10-1** Class catalog admin: order, next class, open for enrolment (replaces the hard-coded 8th block)
+- **F-M10-2** School-year integrity: one active school-year per school; writes and reactivation land in it
+- **F-M10-3** Year-scoped reads by the school's own active year (replaces `active_year_slot_q`)
+- **F-M10-4** Holidays linked to the school-year (backfilled)
+- **F-M10-5** Progression run model, row log and school freeze
+- **F-M10-6** Precheck and preview, including graduation marking
+- **F-M10-7** Start run (global flip, non-converted cleanup) and execute per school (one transaction each)
+- **F-M10-8** Per-school undo until the first new-year write
+- **F-M10-9** Admin Year Progression screens (step wizard + Runs tab)
+
+## Major out-of-scope items
+
+- Viewing old years; copying timetables, term dates or holidays forward; multiple programs or subjects; automatic progression; undo after new-year writes
+
+> **Detailed M10 spec:** `docs/milestones/M10.md`
 
 ---
 

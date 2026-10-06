@@ -13,6 +13,7 @@ from sessionops.models import (
     Subject,
     User,
 )
+from sessionops.services.academic_year.queries import current_year_q
 
 _FOUNDATION_SUBJECT_CACHE: Subject | None = None
 
@@ -106,10 +107,13 @@ def check_r6_volunteer_single_assignment(
 
     Scope: system-wide, not just "in this slot" — combined with R4 (one school per
     volunteer), a volunteer holds at most one active slot-class commitment at a time.
+    Only slots in the active academic year count (M9 decision, 2026-09-28): old-year
+    assignments are hidden on every screen, so they must not block a new assignment.
     `exclude_scs` lets edit_slot_class's volunteer-swap flow re-check a volunteer
     against everything except the slot-class currently being edited.
     """
     qs = SlotClassSectionVolunteer.objects.filter(
+        current_year_q("slot_class_section_id__slot_id__"),
         volunteer_id=volunteer,
         is_active=True,
         removed=False,

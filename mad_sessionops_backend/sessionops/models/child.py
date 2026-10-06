@@ -9,6 +9,9 @@ REMOVED_REASONS = [
     ("family_declined", "Family does not want the child enrolled"),
     ("child_declined", "Child no longer interested in participating"),
     ("other", "Other"),
+    # M10: set only by year progression (preview graduation marks) — not offered in
+    # the CO Deactivate dialog (DeactivateIn doesn't accept it).
+    ("graduated", "Graduated"),
 ]
 
 

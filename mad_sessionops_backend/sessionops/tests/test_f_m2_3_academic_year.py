@@ -182,3 +182,104 @@ class TestSchoolAcademicYearAutoCreate:
             school_id=school_id, is_active=True, removed=False
         )
         assert active_says.count() == 1
+
+
+# ── Year guardrails (2026-10-02): next year only, remove unused, locked rename ──
+
+
+def _year(user, label, active=False):
+    return AcademicYear.objects.create(label=label, is_active=active, created_by=user)
+
+
+@pytest.mark.django_db
+class TestNextYearOnly:
+    def test_only_the_year_after_the_latest_can_be_created(self):
+        from sessionops.exceptions import ValidationError
+
+        user = _make_user()
+        _year(user, "2026-2027", active=True)
+        with pytest.raises(ValidationError, match="must be 2027-2028"):
+            create_academic_year(AcademicYearCreateIn(label="2028-2029"), user)
+        with pytest.raises(ValidationError, match="must be 2027-2028"):
+            create_academic_year(AcademicYearCreateIn(label="2025-2026"), user)
+        assert (
+            create_academic_year(AcademicYearCreateIn(label="2027-2028"), user).is_active is False
+        )
+
+    def test_re_adding_a_removed_year_restores_it(self):
+        from sessionops.services.academic_year.queries import remove_academic_year
+
+        user = _make_user()
+        _year(user, "2026-2027", active=True)
+        added = create_academic_year(AcademicYearCreateIn(label="2027-2028"), user)
+        remove_academic_year(added.pk, user)
+
+        again = create_academic_year(AcademicYearCreateIn(label="2027-2028"), user)
+
+        assert again.pk == added.pk and again.removed is False and again.is_active is False
+
+
+@pytest.mark.django_db
+class TestRemoveYear:
+    def test_removes_unused_inactive_year(self):
+        from sessionops.services.academic_year.queries import remove_academic_year
+
+        user = _make_user()
+        _year(user, "2026-2027", active=True)
+        nxt = _year(user, "2027-2028")
+        assert [y.can_remove for y in get_all_academic_years()] == [True, False]
+
+        remove_academic_year(nxt.pk, user)
+
+        nxt.refresh_from_db()
+        assert nxt.removed is True and nxt.deleted_at is not None
+        assert [y.label for y in get_all_academic_years()] == ["2026-2027"]
+
+    def test_refuses_active_year_and_year_used_by_a_school(self):
+        from sessionops.services.academic_year.queries import remove_academic_year
+
+        user = _make_user()
+        active = _year(user, "2026-2027", active=True)
+        old = _year(user, "2025-2026")
+        SchoolAcademicYear.objects.create(
+            school_id=1, academic_year_id=old, is_active=False, created_by=user
+        )
+        with pytest.raises(ConflictError, match="active academic year"):
+            remove_academic_year(active.pk, user)
+        with pytest.raises(ConflictError, match="used by 1 school"):
+            remove_academic_year(old.pk, user)
+        assert {y.label: y.school_count for y in get_all_academic_years()} == {
+            "2026-2027": 0,
+            "2025-2026": 1,
+        }
+
+    def test_api_delete_is_admin_only_and_returns_204(self, client):
+        from sessionops.tests.exports.factories import auth_headers, make_user
+
+        admin = make_user("Function Lead")
+        _year(admin, "2026-2027", active=True)
+        nxt = _year(admin, "2027-2028")
+        url = f"/api/academic-years/admin/{nxt.pk}/"
+
+        assert client.delete(url, **auth_headers(make_user("CO Full Time"))).status_code == 403
+        assert client.delete(url, **auth_headers(admin)).status_code == 204
+
+
+@pytest.mark.django_db
+class TestRenameLocked:
+    def test_rename_refused_once_a_school_uses_the_year(self):
+        user = _make_user()
+        _year(user, "2025-2026")
+        year = _year(user, "2026-2027")
+        SchoolAcademicYear.objects.create(school_id=1, academic_year_id=year, created_by=user)
+        with pytest.raises(ConflictError, match="cannot be renamed"):
+            update_academic_year(year.pk, AcademicYearUpdateIn(label="2027-2028"))
+
+    def test_rename_must_keep_years_gap_free(self):
+        from sessionops.exceptions import ValidationError
+
+        user = _make_user()
+        _year(user, "2026-2027", active=True)
+        nxt = _year(user, "2027-2028")
+        with pytest.raises(ValidationError, match="must be 2027-2028"):
+            update_academic_year(nxt.pk, AcademicYearUpdateIn(label="2029-2030"))

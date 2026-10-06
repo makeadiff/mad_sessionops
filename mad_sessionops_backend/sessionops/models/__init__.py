@@ -52,6 +52,9 @@ from sessionops.models.child import (
 from sessionops.models.child_subject import ChildSubject
 from sessionops.models.class_section import ClassSection
 from sessionops.models.class_section_subject import ClassSectionSubject
+
+# M9 models
+from sessionops.models.export_log import EXPORT_TYPES, ExportLog
 from sessionops.models.grade_class import Class, SchoolClass
 from sessionops.models.partner import Partner
 
@@ -59,6 +62,14 @@ from sessionops.models.partner import Partner
 from sessionops.models.partner_worknode import PartnerWorknode
 from sessionops.models.password_reset_token import PasswordResetToken
 from sessionops.models.program import Program
+
+# M10 models
+from sessionops.models.progression import (
+    FROZEN_STATUSES,
+    ProgressionRowLog,
+    ProgressionRun,
+    SchoolProgression,
+)
 
 # M8a models
 from sessionops.models.realtime_sync_log import (
@@ -120,4 +131,12 @@ __all__ = [
     "EVENT_TYPES",
     "SYNC_STATUSES",
     "ACTIONS_TAKEN",
+    # M10
+    "ProgressionRun",
+    "SchoolProgression",
+    "ProgressionRowLog",
+    "FROZEN_STATUSES",
+    # M9
+    "ExportLog",
+    "EXPORT_TYPES",
 ]

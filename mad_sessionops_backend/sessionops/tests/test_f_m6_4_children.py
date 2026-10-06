@@ -57,7 +57,13 @@ def _make_school_class(school_id: int, user: User, class_code: str = "5") -> Sch
     program, _ = Program.objects.get_or_create(program_name="Foundation Program")
     cls, _ = Class.objects.get_or_create(
         class_code=class_code,
-        defaults={"class_name": f"{class_code}th", "program_id": program, "is_active": True},
+        defaults={
+            "class_name": f"{class_code}th",
+            "program_id": program,
+            "is_active": True,
+            "open_for_enrolment": class_code
+            != "8",  # 8th is closed for new enrolment in the seeded catalog (F-M10-1)
+        },
     )
     year, _ = AcademicYear.objects.get_or_create(
         label="2026-2027",

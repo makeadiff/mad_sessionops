@@ -2,12 +2,19 @@
 
 import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { useSelector } from "react-redux";
+import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
 import Skeleton from "@mui/material/Skeleton";
 import { GraduationCap, Users, BookOpen } from "lucide-react";
 import { colors } from "@/config/design-tokens";
 import { SchoolToolbar } from "./SchoolToolbar";
+import {
+  exportAllChildren,
+  exportAllVolunteers,
+  exportGapReport,
+  exportSchoolsSummary,
+} from "@/lib/api/services/exports.service";
 import { SchoolTable } from "./SchoolTable";
 import { SchoolEmptyState } from "./SchoolEmptyState";
 import { fetchSchools, parseSortOption } from "@/lib/api/services/schools.service";
@@ -137,6 +144,8 @@ export function SchoolListPage({ userName }: SchoolListPageProps) {
   );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [progressingCount, setProgressingCount] = useState(0);
+  const [progressingDismissed, setProgressingDismissed] = useState(false);
 
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -151,6 +160,7 @@ export function SchoolListPage({ userName }: SchoolListPageProps) {
       setAllSchools(data.schools);
       setSummary(data.summary);
       setScopeWarning(data.scopeWarning);
+      setProgressingCount(data.progressingCount ?? 0);
     } catch {
       setError("Could not load schools. Please try again.");
     } finally {
@@ -255,11 +265,31 @@ export function SchoolListPage({ userName }: SchoolListPageProps) {
             onSearchChange={handleSearchChange}
             sort={sort}
             onSortChange={setSort}
+            exportOptions={[
+              // F-M9-5: exports follow the applied (debounced) search, like the visible list
+              { label: "Schools summary", onExport: () => exportSchoolsSummary(debouncedSearch) },
+              { label: "All children", onExport: () => exportAllChildren(debouncedSearch) },
+              { label: "All volunteers", onExport: () => exportAllVolunteers(debouncedSearch) },
+              { label: "Gap report", onExport: () => exportGapReport(debouncedSearch) },
+            ]}
           />
         )}
 
         {error && (
           <Typography sx={{ color: "error.main", mt: 1.5, fontSize: "13px" }}>{error}</Typography>
+        )}
+
+        {/* M10 F-M10-5: some of this user's schools are hidden while they progress */}
+        {progressingCount > 0 && !progressingDismissed && (
+          <Alert
+            severity="info"
+            onClose={() => setProgressingDismissed(true)}
+            sx={{ mt: 1.5, fontSize: "13px" }}
+          >
+            {progressingCount === 1
+              ? "1 of your schools is being moved to the next academic year. It will be back shortly."
+              : `${progressingCount} of your schools are being moved to the next academic year. They will be back shortly.`}
+          </Alert>
         )}
       </Box>
 

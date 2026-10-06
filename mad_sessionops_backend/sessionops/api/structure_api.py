@@ -7,7 +7,6 @@ Section endpoints: F-M2-5
 
 from ninja import Router
 
-from sessionops.models import Class
 from sessionops.models.class_section import SECTION_CODES
 from sessionops.schemas.structure import (
     AvailableCodesOut,
@@ -22,13 +21,13 @@ from sessionops.schemas.structure import (
     SectionAddIn,
     SectionOut,
 )
+from sessionops.services.catalog.queries import list_open_catalog
 from sessionops.services.rbac.scope import get_school_or_403
 from sessionops.services.structure.bucket_children import (
     add_child_to_bucket,
     remove_child_from_bucket,
 )
 from sessionops.services.structure.queries import (
-    BLOCKED_NEW_CLASS_CODES,
     add_class_to_school,
     list_classes_for_school,
     soft_delete_school_class,
@@ -52,13 +51,9 @@ classes_catalog_router = Router(tags=["Classes Catalog"])
 
 @classes_catalog_router.get("/", response=list[ClassCatalogItemOut], auth=None)
 def list_class_catalog(request):
-    # Class 8 is excluded here — it's only reachable via year-end progression,
-    # never a direct add. See BLOCKED_NEW_CLASS_CODES.
-    return (
-        Class.objects.filter(is_active=True, removed=False)
-        .exclude(class_code__in=BLOCKED_NEW_CLASS_CODES)
-        .select_related("program_id")
-    )
+    # Only classes open for new enrolment can be added to a school (F-M10-1);
+    # closed ones (e.g. 8th) are reachable via year-end progression only.
+    return list_open_catalog()
 
 
 @classes_catalog_router.get("/section-codes/", auth=None)

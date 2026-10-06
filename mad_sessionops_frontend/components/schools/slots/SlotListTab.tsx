@@ -15,6 +15,8 @@ import { EditSlotModal } from "./EditSlotModal";
 import { DeleteSlotModal } from "./DeleteSlotModal";
 import { SlotGridView } from "./SlotGridView";
 import { formatTime } from "./SlotCard";
+import { ExportButton } from "@/components/ui/ExportButton";
+import { exportSchoolTimetable } from "@/lib/api/services/exports.service";
 import toast from "react-hot-toast";
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -270,6 +272,11 @@ export function SlotListTab({ schoolId, canModify = true }: SlotListTabProps) {
           )}
         </Box>
         <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+          {/* F-M9-4: timetable CSV — nothing to export until a slot exists */}
+          <ExportButton
+            disabled={slots.length === 0}
+            options={[{ label: "Timetable", onExport: () => exportSchoolTimetable(schoolId) }]}
+          />
           {/* View toggle */}
           <Box
             sx={{

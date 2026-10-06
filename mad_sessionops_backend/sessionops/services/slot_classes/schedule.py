@@ -10,6 +10,7 @@ from sessionops.models import (
     SlotClassSectionVolunteer,
     User,
 )
+from sessionops.services.academic_year.queries import current_year_q
 from sessionops.services.rbac.scope import can_view_school
 from sessionops.services.slot_classes.helpers import normalize_subject_display_name
 
@@ -68,7 +69,7 @@ def get_school_schedule(
     )
 
     slots_qs = (
-        Slot.objects.filter(school_id=school_id, is_active=True, removed=False)
+        Slot.objects.filter(current_year_q(), school_id=school_id, is_active=True, removed=False)
         .prefetch_related(Prefetch("slotclasssection_set", queryset=scs_qs))
         .order_by("start_time")
     )

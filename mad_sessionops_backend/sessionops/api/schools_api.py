@@ -10,7 +10,9 @@ from sessionops.schemas.schools import (
     SchoolSummarySchema,
 )
 from sessionops.services.rbac import get_scope_warning, schools_visible_to
+from sessionops.services.rbac.scope import frozen_schools_in_scope_count
 from sessionops.services.schools.queries import (
+    filter_schools_by_search,
     get_active_academic_year_label,
     get_active_volunteers_count,
     get_chos_for_school,
@@ -52,14 +54,7 @@ def list_schools(request):
     qs = schools_visible_to(request.auth)
     scope_warning = get_scope_warning(request.auth)
 
-    search = request.GET.get("search", "").strip()
-    if search:
-        qs = (
-            qs.filter(partner_name__icontains=search)
-            | schools_visible_to(request.auth).filter(city__icontains=search)
-            | schools_visible_to(request.auth).filter(state__icontains=search)
-        )
-        qs = qs.distinct()
+    qs = filter_schools_by_search(qs, request.GET.get("search"))
 
     partners = list(qs.order_by("-partner_updated_date", "-synced_at"))
     partner_ids = [p.partner_id for p in partners]
@@ -74,7 +69,12 @@ def list_schools(request):
         academic_year=get_active_academic_year_label(),
     )
 
-    return SchoolListResponseSchema(schools=schools, summary=summary, scope_warning=scope_warning)
+    return SchoolListResponseSchema(
+        schools=schools,
+        summary=summary,
+        scope_warning=scope_warning,
+        progressing_count=frozen_schools_in_scope_count(request.auth),
+    )
 
 
 @schools_router.get("/{partner_id}", response=SchoolDetailSchema)

@@ -626,3 +626,52 @@ Third-party Django framework tables (django_*, auth_*, token_blacklist_*, django
 **Alternatives:**
 - **Keep enum reasons:** useful for categorical reporting but adds friction at enrollment time. Deferred.
 - **Soft-delete the log:** adds complexity with no benefit for an audit log. Rejected.
+
+---
+
+## D031 — CSV exports: view-scope access, personal data included and audited, built server-side
+
+**Date:** M9 planning (2026-09-26 / 2026-09-27)
+**Status:** Accepted
+
+**Context:** The ops team needs spreadsheets (rosters, timetables, school summaries, setup gaps) for reporting and follow-up with schools. Until M9 the tool had no way to export data, and M1 had listed exports as out of scope. The open questions were who may export, whether personal data (child date of birth, volunteer phone numbers) is included, and where the file is generated.
+
+**Decision:**
+- **Access follows view scope (R13).** Anyone who can view a school can export it. Per-school exports use `get_school_or_403`; cross-school exports start from `schools_visible_to` (via `services/exports/scope.py::export_school_ids`). There is no separate export permission. CXO gets admin scope, as on the Schools page.
+- **Personal data is included, and every export is audited.** Each successful export writes one `ExportLog` row: user, export type, school (null for cross-school), filters, school count, row count and time. The log is append-only and has no soft-delete columns (see R9 exceptions).
+- **The server builds the CSV, in memory.** `services/exports/csv_writer.py::build_csv_response` returns a single `HttpResponse`: UTF-8 with a BOM, CRLF line endings, `Cache-Control: no-store`, and a leading `'` on any cell starting with `= + - @` (formula-injection guard). The audit row is written before the response is returned, so it can't be lost if the client disconnects.
+- **Active academic year only.** A missing active year returns 404 through the existing `get_active_academic_year()`.
+- **Datetimes in CSV cells are rendered in IST.** This is a deliberate exception to the "display conversion happens on the frontend" convention: a CSV has no frontend step to convert them, and ops users read the times directly.
+
+**Consequences:**
+- There is no new permission model to maintain, and exports can never show more than the screen does.
+- Exported files contain personal data once they leave the system. The audit log records who exported what, but it doesn't control where the files go afterwards.
+- `export_log` grows without bound until a retention policy is defined (deferred).
+- Files are held in memory; this is fine at current volumes (the largest export is about 1 MB). Switching to streaming later only touches `csv_writer.py`.
+
+**Alternatives:**
+- **Admin-only exports:** rejected. COs and CHOs are the main users of rosters and timetables.
+- **Exclude personal data:** rejected. Ops needs contact details and dates of birth for school follow-up.
+- **Generate the CSV in the browser from existing list endpoints:** rejected. It would put business logic in the frontend and would need many requests for cross-school exports.
+- **`StreamingHttpResponse`:** deferred. The audit write would have to happen inside the generator after the view returns, where it can be lost when the client disconnects.
+
+
+## D032 — Year progression moves each school from its own year; the active year follows the newest year in use
+
+**Date:** 2026-10-05
+**Status:** Accepted (revises the single-target design in M10 / F-M10-6 and F-M10-7)
+
+**Context:** In the first M10 design, each run had one target year. While any converted school was behind the active year, the only possible target was the active year. So the next year (e.g. 2027-28) couldn't be used until every straggler (e.g. a school still on 2025-26) had been progressed. In practice some schools stay behind on purpose, and a few want to move early, so one school held up everyone else.
+
+**Decision:**
+- Each school's target is **the year after its own active school-year**. One run can mix moves (2025-26 → 2026-27 and 2026-27 → 2027-28).
+- **No skipping years.** A school two years behind is progressed twice. Each step has its own preview and Undo, and the preview warns `STILL_BEHIND`.
+- **The global active year (R8) follows the newest year any school moves into.** Start flips it when a selected school's target is later than the active year. Undo never flips it back. New schools join the active year.
+- **The target is fixed at Start** on `SchoolProgression.to_academic_year_id`. Execute re-plans against that pinned year and blocks with `TARGET_NOT_LATER` if the school's year changed in the meantime.
+- **One school per run** (2026-10-06, same day follow-up). Each run moves exactly one school, and `start_run` rejects more than one. Every move is previewed and confirmed on its own: the admin types the school's name before Start.
+- **Academic-year guardrails:** only the next year after the latest can be created. Remove is allowed only for an inactive, unused year. Rename is locked to the same conditions. There is no manual activate switch.
+
+**Consequences:**
+- Stragglers never block other schools. The Schools step shows each school's "current → next" year, a "years behind" label and a year filter.
+- `ProgressionRun.from/to_academic_year_id` are now nullable and unused for new runs; the API reports `year_moves` per run and `from/to_year_label` per school.
+- Schools can be on different years at once. This was already supported by R8a and the `current_year_q` scoping from F-M10-3.

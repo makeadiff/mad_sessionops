@@ -35,6 +35,8 @@ class SchoolListResponseSchema(Schema):
     schools: list[SchoolListItemSchema]
     summary: SchoolSummarySchema
     scope_warning: Optional[ScopeWarningSchema] = None
+    # F-M10-5: in-scope schools hidden because they are being progressed
+    progressing_count: int = 0
 
 
 class ChoOut(Schema):

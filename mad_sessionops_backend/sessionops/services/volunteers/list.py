@@ -1,4 +1,5 @@
 from sessionops.models import PartnerWorknode, SlotClassSectionVolunteer, User
+from sessionops.services.academic_year.queries import current_year_q
 from sessionops.services.rbac.scope import get_school_or_403
 
 
@@ -43,6 +44,8 @@ def list_school_volunteers(school_id: int, requesting_user) -> dict:
             "volunteers": [],
         }
 
+    # Only the active academic year's slots count as current assignments.
+    in_active_year = current_year_q("slot_class_section_id__slot_id__")
     serialized = []
     for v in volunteers:
         # active_slot_class_section_id: which slot-class (if any) this volunteer
@@ -52,6 +55,7 @@ def list_school_volunteers(school_id: int, requesting_user) -> dict:
         # if legacy/manually-inserted data ever has more than one.
         active_scs_ids = list(
             SlotClassSectionVolunteer.objects.filter(
+                in_active_year,
                 volunteer_id=v,
                 is_active=True,
                 removed=False,
