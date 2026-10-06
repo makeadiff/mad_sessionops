@@ -20,10 +20,13 @@ from django.db import transaction
 from django.utils import timezone
 
 from sessionops.models import (
+    BatchChild,
     Child,
     ChildClass,
     ChildClassSection,
+    ChildProgram,
     ChildRemovalLog,
+    ChildSubject,
     ClassSection,
     ClassSectionSubject,
     Partner,
@@ -87,6 +90,20 @@ def cascade_deactivate_school(school_id: int, now: datetime | None = None) -> di
         ).update(is_active=False, removed=True, deleted_at=now)
 
         counts["child_class_section"] = ChildClassSection.objects.filter(
+            child_id__school_id=school_id, is_active=True, removed=False
+        ).update(is_active=False, removed=True, deleted_at=now)
+
+        # Child-level links that would otherwise stay active under removed
+        # children (enrolment-in-year, program, subject history).
+        counts["batch_child"] = BatchChild.objects.filter(
+            school_id=school_id, is_active=True, removed=False
+        ).update(is_active=False, removed=True, deleted_at=now)
+
+        counts["child_program"] = ChildProgram.objects.filter(
+            child_id__school_id=school_id, is_active=True, removed=False
+        ).update(is_active=False, removed=True, deleted_at=now)
+
+        counts["child_subject"] = ChildSubject.objects.filter(
             child_id__school_id=school_id, is_active=True, removed=False
         ).update(is_active=False, removed=True, deleted_at=now)
 

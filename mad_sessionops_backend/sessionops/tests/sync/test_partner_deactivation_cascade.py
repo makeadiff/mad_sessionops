@@ -14,10 +14,13 @@ import pytest
 
 from sessionops.models import (
     AcademicYear,
+    BatchChild,
     Child,
     ChildClass,
     ChildClassSection,
+    ChildProgram,
     ChildRemovalLog,
+    ChildSubject,
     Class,
     ClassSection,
     ClassSectionSubject,
@@ -246,7 +249,7 @@ def _holiday(school_id: int, admin: User, **kwargs) -> SchoolHoliday:
 
 def _build_full_school(admin: User) -> dict:
     """
-    Build one active school with a full FK chain across all 14 cascade tables:
+    Build one active school with a full FK chain across all 17 cascade tables:
     slot layer (slot -> slot_class_section -> slot_class_section_volunteer),
     school_volunteer, a child with child_class_section + child_class, and the
     structural layer (class_section, school_class, school_academic_year,
@@ -268,6 +271,19 @@ def _build_full_school(admin: User) -> dict:
     child = _child(school_id, admin)
     ccs = _child_class_section(child, section, admin)
     cc = _child_class(child, school_class, admin)
+    batch_child = BatchChild.objects.create(
+        school_academic_year_id=_say(school_id, admin),
+        child_id=child,
+        school_id=school_id,
+        created_by=admin,
+    )
+    program, _ = Program.objects.get_or_create(program_name="Foundation Program")
+    child_program = ChildProgram.objects.create(
+        program_id=program, child_id=child, created_by=admin
+    )
+    child_subject = ChildSubject.objects.create(
+        child_id=child, class_section_subject_id=css, created_by=admin
+    )
 
     session = _session_details(school_id, admin)
     holiday = _holiday(school_id, admin)
@@ -285,6 +301,9 @@ def _build_full_school(admin: User) -> dict:
         "child": child,
         "ccs": ccs,
         "cc": cc,
+        "batch_child": batch_child,
+        "child_program": child_program,
+        "child_subject": child_subject,
         "session": session,
         "holiday": holiday,
     }
@@ -396,6 +415,18 @@ def test_cascade_deactivates_all_active_child_classes():
     cascade_deactivate_school(built["school_id"])
 
     _assert_inactive(ChildClass, pk=built["cc"].pk)
+
+
+@pytest.mark.django_db
+def test_cascade_deactivates_child_batch_program_and_subject_links():
+    admin = _admin()
+    built = _build_full_school(admin)
+
+    cascade_deactivate_school(built["school_id"])
+
+    _assert_inactive(BatchChild, pk=built["batch_child"].pk)
+    _assert_inactive(ChildProgram, pk=built["child_program"].pk)
+    _assert_inactive(ChildSubject, pk=built["child_subject"].pk)
 
 
 @pytest.mark.django_db
@@ -520,6 +551,9 @@ def test_cascade_returns_accurate_counts_dict():
     assert counts["child_removal_log"] == 1
     assert counts["child"] == 1
     assert counts["child_class"] == 1
+    assert counts["batch_child"] == 1
+    assert counts["child_program"] == 1
+    assert counts["child_subject"] == 1
     assert counts["class_section"] == 1
     assert counts["school_class"] == 1
     assert counts["school_academic_year"] == 1

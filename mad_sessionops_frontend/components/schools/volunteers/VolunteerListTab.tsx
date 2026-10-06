@@ -13,6 +13,8 @@ import {
 import { VolunteerCard } from "./VolunteerCard";
 import { VolunteerDetailDrawer } from "./VolunteerDetailDrawer";
 import { RichEmptyState } from "@/components/schools/shared/RichEmptyState";
+import { ExportButton } from "@/components/ui/ExportButton";
+import { exportSchoolVolunteers } from "@/lib/api/services/exports.service";
 
 // ── Design tokens ──────────────────────────────────────────────────────────────
 
@@ -229,6 +231,10 @@ export function VolunteerListTab({ schoolId }: Props) {
           </Typography>
         </Box>
         <Box sx={{ flex: 1, height: "1px", bgcolor: BORDER }} />
+        {/* F-M9-3: only in the populated state — the empty states have nothing to export */}
+        <ExportButton
+          options={[{ label: "Volunteers", onExport: () => exportSchoolVolunteers(schoolId) }]}
+        />
       </Box>
 
       {/* Volunteer list */}

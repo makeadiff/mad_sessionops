@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { Suspense, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAppSelector } from "@/lib/redux";
 import { selectUser, selectIsInitialized } from "@/lib/redux/features/auth/authSlice";
@@ -29,5 +29,10 @@ export default function AdminRoute() {
     return null;
   }
 
-  return <AdminPage />;
+  // AdminPage reads ?tab= (useSearchParams), which needs a Suspense boundary.
+  return (
+    <Suspense fallback={null}>
+      <AdminPage />
+    </Suspense>
+  );
 }

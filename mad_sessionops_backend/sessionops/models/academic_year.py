@@ -52,6 +52,13 @@ class SchoolAcademicYear(models.Model):
                 condition=models.Q(removed=False),
                 name="uniq_school_academic_year",
             ),
+            # F-M10-2: a school has exactly one active school-year; every year-scoped
+            # read and write relies on it.
+            models.UniqueConstraint(
+                fields=["school_id"],
+                condition=models.Q(is_active=True, removed=False),
+                name="uniq_active_say_per_school",
+            ),
         ]
 
     def __str__(self) -> str:

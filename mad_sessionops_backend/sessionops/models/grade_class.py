@@ -8,6 +8,21 @@ class Class(models.Model):
     program_id = models.ForeignKey(
         "sessionops.Program", on_delete=models.PROTECT, db_column="program_id"
     )
+    # F-M10-1: admin-managed catalog. `sequence` is a derived sort key, rewritten
+    # from the next-class chain on every catalog write (services/catalog/order.py)
+    # — never admin input; `next_class_id` is where year progression moves
+    # children (null = they stay in this class); `open_for_enrolment` replaces
+    # the old hard-coded BLOCKED_NEW_CLASS_CODES.
+    sequence = models.IntegerField(default=0, db_index=True)
+    next_class_id = models.ForeignKey(
+        "self",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        db_column="next_class_id",
+        related_name="previous_classes",
+    )
+    open_for_enrolment = models.BooleanField(default=True)
     is_active = models.BooleanField(default=True)
     removed = models.BooleanField(default=False)
     deleted_at = models.DateTimeField(null=True, blank=True)
@@ -22,7 +37,7 @@ class Class(models.Model):
 
     class Meta:
         db_table = "class"
-        ordering = ["class_code"]
+        ordering = ["sequence", "class_code"]
 
     def __str__(self) -> str:
         return self.class_name

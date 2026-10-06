@@ -2,40 +2,20 @@ from django.db import IntegrityError
 from django.db.models import Count, Q, QuerySet
 from django.utils import timezone
 
-from sessionops.exceptions import ConflictError, NotFound, ValidationError
+from sessionops.exceptions import ConflictError, NotFound
 from sessionops.models import ChildClass, Class, SchoolClass
-
-# MAD's program scope is 5th-7th for now; 8th only exists because last year's
-# 7th-graders progress into it (via Bubble's child/academic-year progression,
-# not yet rebuilt here post-M6 decoupling). Nobody should be able to newly
-# add class 8 to a school, or newly assign a child into it (enroll/reactivate/
-# edit — see services/children/*.py), until that progression flow lands in
-# Session-Ops.
-BLOCKED_NEW_CLASS_CODES = frozenset(["8"])
-
-
-def assert_class_not_blocked_for_assignment(class_code: str, class_name: str) -> None:
-    """
-    Raise ValidationError if class_code is blocked for direct/manual assignment.
-
-    Shared by add_class_to_school (structure) and enroll_child / reactivate_child /
-    edit_child (children) — anywhere a school_class_id is about to be newly bound,
-    whether that's adding the class to the school's structure or assigning a child
-    to it.
-    """
-    if class_code in BLOCKED_NEW_CLASS_CODES:
-        raise ValidationError(
-            f"{class_name} cannot be assigned directly. "
-            f"It is only reachable via year-end progression from a lower class."
-        )
-
+from sessionops.services.academic_year.queries import current_year_q
+from sessionops.services.catalog.rules import assert_class_open_for_enrolment
 
 # ── Classes ────────────────────────────────────────────────────────────────────
 
 
 def list_classes_for_school(school_id: int) -> QuerySet:
+    """The school's classes in its own active school-year (F-M10-3)."""
     return (
-        SchoolClass.objects.filter(school_id=school_id, is_active=True, removed=False)
+        SchoolClass.objects.filter(
+            current_year_q(), school_id=school_id, is_active=True, removed=False
+        )
         .select_related("class_id", "class_id__program_id")
         .annotate(
             sections_count=Count(
@@ -43,7 +23,7 @@ def list_classes_for_school(school_id: int) -> QuerySet:
                 filter=Q(classsection__is_active=True, classsection__removed=False),
             )
         )
-        .order_by("class_id__class_code")
+        .order_by("class_id__sequence", "class_id__class_code")
     )
 
 
@@ -55,7 +35,7 @@ def add_class_to_school(school_id: int, class_id: int, user) -> SchoolClass:
     except Class.DoesNotExist:
         raise NotFound(f"Class {class_id} not found in catalog.")
 
-    assert_class_not_blocked_for_assignment(cls.class_code, f"Class {cls.class_name}")
+    assert_class_open_for_enrolment(cls)
 
     say = get_or_create_school_academic_year(school_id, user)
     try:

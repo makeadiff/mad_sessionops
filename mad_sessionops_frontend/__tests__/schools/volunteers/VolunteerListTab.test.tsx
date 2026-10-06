@@ -10,7 +10,12 @@ vi.mock("@/lib/api/services/volunteers.service", () => ({
   fetchVolunteers: vi.fn(),
 }));
 
+vi.mock("@/lib/api/services/exports.service", () => ({
+  exportSchoolVolunteers: vi.fn().mockResolvedValue(undefined),
+}));
+
 import { fetchVolunteers } from "@/lib/api/services/volunteers.service";
+import { exportSchoolVolunteers } from "@/lib/api/services/exports.service";
 
 function makeResponse(overrides: Partial<VolunteerListResponse> = {}): VolunteerListResponse {
   return {
@@ -181,4 +186,49 @@ describe("VolunteerListTab", () => {
 
     await waitFor(() => expect(screen.queryByText("asha@example.com")).not.toBeInTheDocument());
   });
+
+  // ── F-M9-3 Export CSV ────────────────────────────────────────────────────────
+
+  it("test_export_button_in_populated_state_calls_export", async () => {
+    vi.mocked(fetchVolunteers).mockResolvedValue(
+      makeResponse({
+        status: "ok",
+        volunteers: [
+          {
+            userId: 1,
+            userDisplayName: "Asha Kumar",
+            userLogin: "asha.kumar",
+            userRole: "Wingman",
+            email: "asha@example.com",
+            contact: null,
+            city: null,
+            state: null,
+            activeSlotClassCount: 0,
+            activeSlotClassSectionId: null,
+          },
+        ],
+      })
+    );
+
+    render(<VolunteerListTab schoolId={580} />);
+    await waitFor(() => expect(screen.getByText("Asha Kumar")).toBeInTheDocument());
+
+    await userEvent.click(screen.getByRole("button", { name: /export csv/i }));
+
+    await waitFor(() => expect(exportSchoolVolunteers).toHaveBeenCalledWith(580));
+  });
+
+  it.each(["no_worknode", "no_volunteers"] as const)(
+    "test_export_button_hidden_in_%s_state",
+    async (status) => {
+      vi.mocked(fetchVolunteers).mockResolvedValue(makeResponse({ status, message: "x" }));
+
+      render(<VolunteerListTab schoolId={580} />);
+
+      await waitFor(() => expect(screen.queryByRole("progressbar")).not.toBeInTheDocument());
+      await waitFor(() =>
+        expect(screen.queryByRole("button", { name: /export csv/i })).not.toBeInTheDocument()
+      );
+    }
+  );
 });

@@ -31,6 +31,8 @@ import { EditChildDrawer } from "./EditChildDrawer";
 import { DeactivateChildModal } from "./DeactivateChildModal";
 import { ReactivateChildModal } from "./ReactivateChildModal";
 import { RichEmptyState } from "@/components/schools/shared/RichEmptyState";
+import { ExportButton } from "@/components/ui/ExportButton";
+import { exportSchoolChildren } from "@/lib/api/services/exports.service";
 import toast from "react-hot-toast";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -489,6 +491,16 @@ export function ChildrenTab({ schoolId, activeYear, canModify = true }: Children
   };
 
   const hasFilters = !!debouncedSearch || !!classId || bucketFilter !== "all";
+
+  // F-M9-2: export exactly the current view — same filters as the list request, plus status.
+  const handleExport = () =>
+    exportSchoolChildren(schoolId, {
+      status,
+      search: debouncedSearch,
+      classId,
+      sectionId: typeof bucketFilter === "number" ? bucketFilter : null,
+      unassigned: bucketFilter === "unassigned",
+    });
   const isEmpty = !loading && !loadError && allChildren.length === 0 && !hasFilters;
   const noResults = !loading && !loadError && displayChildren.length === 0 && !isEmpty;
 
@@ -509,23 +521,29 @@ export function ChildrenTab({ schoolId, activeYear, canModify = true }: Children
               </Typography>
             )}
           </Box>
-          {canModify && (
-            <Button
-              variant="contained"
-              size="small"
-              startIcon={<Plus size={14} />}
-              onClick={() => setEnrollOpen(true)}
-              sx={{
-                bgcolor: "#2563EB",
-                "&:hover": { bgcolor: "#1D4ED8" },
-                fontSize: "13px",
-                fontWeight: 600,
-                boxShadow: "none",
-              }}
-            >
-              Enroll Child
-            </Button>
-          )}
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            <ExportButton
+              disabled={loading || loadError}
+              options={[{ label: "Children", onExport: handleExport }]}
+            />
+            {canModify && (
+              <Button
+                variant="contained"
+                size="small"
+                startIcon={<Plus size={14} />}
+                onClick={() => setEnrollOpen(true)}
+                sx={{
+                  bgcolor: "#2563EB",
+                  "&:hover": { bgcolor: "#1D4ED8" },
+                  fontSize: "13px",
+                  fontWeight: 600,
+                  boxShadow: "none",
+                }}
+              >
+                Enroll Child
+              </Button>
+            )}
+          </Box>
         </Box>
 
         {/* ── Toolbar: search + class/section + status ── */}

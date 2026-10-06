@@ -66,7 +66,13 @@ def _get_or_create_class(class_code: str = "5", class_name: str = "5th") -> Clas
     program, _ = Program.objects.get_or_create(program_name="Foundation Program")
     cls, _ = Class.objects.get_or_create(
         class_code=class_code,
-        defaults={"class_name": class_name, "program_id": program, "is_active": True},
+        defaults={
+            "class_name": class_name,
+            "program_id": program,
+            "is_active": True,
+            "open_for_enrolment": class_code
+            != "8",  # 8th is closed for new enrolment in the seeded catalog (F-M10-1)
+        },
     )
     return cls
 
@@ -83,7 +89,11 @@ class TestCatalog:
         for name, code in [("5th", "5"), ("6th", "6"), ("7th", "7"), ("8th", "8")]:
             Class.objects.get_or_create(
                 class_code=code,
-                defaults={"class_name": name, "program_id": program},
+                defaults={
+                    "class_name": name,
+                    "program_id": program,
+                    "open_for_enrolment": code != "8",
+                },
             )
         assert Class.objects.filter(is_active=True, removed=False).count() == 4
 
@@ -96,7 +106,11 @@ class TestCatalog:
         for name, code in [("5th", "5"), ("6th", "6"), ("7th", "7"), ("8th", "8")]:
             Class.objects.get_or_create(
                 class_code=code,
-                defaults={"class_name": name, "program_id": program},
+                defaults={
+                    "class_name": name,
+                    "program_id": program,
+                    "open_for_enrolment": code != "8",
+                },
             )
 
         resp = CLIENT.get("/api/classes/")

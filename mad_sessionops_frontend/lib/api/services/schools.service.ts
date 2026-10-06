@@ -121,6 +121,8 @@ export interface SchoolListResponse {
   schools: SchoolListItem[];
   summary: SchoolSummary;
   scopeWarning: SchoolScopeWarning | null;
+  /** M10: in-scope schools hidden while they are moved to the next academic year */
+  progressingCount?: number;
 }
 
 // ── Raw backend shape (snake_case) ───────────────────────────────────────────
@@ -152,6 +154,7 @@ interface RawSchoolListResponse {
     academic_year: string | null;
   };
   scope_warning: SchoolScopeWarning | null;
+  progressing_count?: number;
 }
 
 function mapItem(raw: RawSchoolItem): SchoolListItem {
@@ -295,5 +298,6 @@ export async function fetchSchools(search?: string): Promise<SchoolListResponse>
       academicYear: data.summary.academic_year,
     },
     scopeWarning: data.scope_warning ?? null,
+    progressingCount: data.progressing_count ?? 0,
   };
 }

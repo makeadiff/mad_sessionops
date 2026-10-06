@@ -35,7 +35,35 @@ def _classify(user: User) -> str:
 
 
 def schools_visible_to(user: User) -> QuerySet:
-    """Return a Partner queryset scoped to what the user may see."""
+    """Return a Partner queryset scoped to what the user may see.
+
+    F-M10-5: schools frozen for year progression are hidden from non-admins.
+    """
+    qs = _schools_in_scope(user)
+    if _classify(user) != "admin":
+        from sessionops.services.progression.freeze import frozen_school_ids
+
+        frozen = frozen_school_ids()
+        if frozen:
+            qs = qs.exclude(partner_id__in=frozen)
+    return qs
+
+
+def frozen_schools_in_scope_count(user: User) -> int:
+    """How many of the user's in-scope schools are hidden by a progression freeze
+    (0 for admins, who still see them) — drives the school-list banner (F-M10-5)."""
+    if _classify(user) == "admin":
+        return 0
+    from sessionops.services.progression.freeze import frozen_school_ids
+
+    frozen = frozen_school_ids()
+    if not frozen:
+        return 0
+    return _schools_in_scope(user).filter(partner_id__in=frozen).count()
+
+
+def _schools_in_scope(user: User) -> QuerySet:
+    """Role scope only, ignoring the progression freeze."""
     scope = _classify(user)
     if scope == "admin":
         return Partner.objects.filter(converted=True)
@@ -111,6 +139,12 @@ def get_school_or_403(user: User, school_id: int) -> Partner:
         raise NotFound(f"School {school_id} not found.")
     if not can_view_school(user, partner):
         raise PermissionDenied()
+    if _classify(user) != "admin":
+        from sessionops.services.progression.freeze import is_school_frozen
+
+        if is_school_frozen(school_id):
+            # Hidden from COs/CHOs while it is being progressed (F-M10-5).
+            raise NotFound(f"School {school_id} not found.")
     return partner
 
 

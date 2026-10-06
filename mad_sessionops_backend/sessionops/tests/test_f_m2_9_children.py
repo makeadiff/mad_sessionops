@@ -62,6 +62,8 @@ def _make_section(
             "class_name": f"{class_code}th",
             "program_id": program,
             "is_active": True,
+            "open_for_enrolment": class_code
+            != "8",  # 8th is closed for new enrolment in the seeded catalog (F-M10-1)
         },
     )
     year, _ = AcademicYear.objects.get_or_create(

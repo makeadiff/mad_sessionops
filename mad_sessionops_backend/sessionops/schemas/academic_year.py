@@ -10,6 +10,17 @@ class AcademicYearOut(Schema):
     label: str
     is_active: bool
     created_at: datetime
+    # Set by get_all_academic_years (admin list); default for other responses.
+    school_count: int = 0
+    can_remove: bool = False
+
+    @staticmethod
+    def resolve_school_count(obj) -> int:
+        return getattr(obj, "school_count", 0)
+
+    @staticmethod
+    def resolve_can_remove(obj) -> bool:
+        return getattr(obj, "can_remove", False)
 
 
 class AcademicYearCreateIn(Schema):

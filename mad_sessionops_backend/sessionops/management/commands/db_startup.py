@@ -82,6 +82,9 @@ class Command(BaseCommand):
                     "migrate", "--noinput", "--database", "migrate", verbosity=0, stdout=self.stdout
                 )
                 self.stdout.write(_ok(f"Applied {pending_count} migration(s)"))
+                # Migrations run as DBADMINUSER, so tables they create are owned by
+                # the admin. Hand them back to DBUSER (no-op when already correct).
+                call_command("fix_table_ownership", stdout=self.stdout)
             else:
                 self.stdout.write(_ok("Up to date -- no pending migrations"))
 

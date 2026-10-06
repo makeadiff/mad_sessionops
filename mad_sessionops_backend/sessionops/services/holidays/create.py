@@ -5,6 +5,8 @@ from django.db.models import Q
 
 from sessionops.exceptions import ConflictError, PermissionDenied, ValidationError
 from sessionops.models import SchoolHoliday
+from sessionops.services.academic_year.queries import get_school_academic_year
+from sessionops.services.holidays.queries import current_year_holidays_q
 from sessionops.services.rbac.scope import can_modify_school, get_school_or_403
 from sessionops.services.sessions.queries import get_active_session
 
@@ -45,7 +47,9 @@ def create_holiday(school_id: int, payload: dict, user) -> SchoolHoliday:
 
     exclude_id: int | None = payload.get("_exclude_id")
 
+    # R-cal-3: overlap only with this school-year's holidays (+ legacy null rows).
     overlap_qs = SchoolHoliday.objects.filter(
+        current_year_holidays_q(),
         school_id=school_id,
         is_active=True,
         removed=False,
@@ -63,6 +67,8 @@ def create_holiday(school_id: int, payload: dict, user) -> SchoolHoliday:
 
     return SchoolHoliday.objects.create(
         school_id=school_id,
+        # The session exists, so the school has an active school-year (F-M10-4).
+        school_academic_year_id=get_school_academic_year(school_id),
         holiday_reason=payload["holiday_reason"],
         start_date=start,
         end_date=end,

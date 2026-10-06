@@ -84,7 +84,23 @@ At most 2 may be assigned; `Vol1` is required, `Vol2` is optional.
 
 **Revised 2026-08-21:** originally scoped to "not two sections in the same slot" only. Broadened after discovering the narrower scope let a volunteer be scheduled into two different (non-overlapping, per R7) slots at the same school — allowed by the old rule's wording, but not an intended real-world commitment pattern.
 
-**Enforcement:** Service layer on slot-class create/edit (`check_r6_volunteer_single_assignment` in `services/slot_classes/helpers.py`). Query: does the volunteer have any other active `SlotClassSectionVolunteer` row at all (any slot, any school)? If yes, raise `ConflictError`.
+**Revised 2026-09-28 (M9):** only assignments on slots in the **active academic year** count. The Slots tab, the Volunteers tab, the school list counts and the M9 exports now show only active-year slots and assignments. A leftover old-year assignment (there were 12 in dev at the time) was invisible to ops but still blocked the volunteer from being assigned; this revision removes that trap. The shared filter is `services/academic_year/queries.py::current_year_q`. **Revised again 2026-09-29 (M10 F-M10-3):** "active year" means the **school's own active school-year** (R8a), not the global flag. A school not yet progressed keeps its own year's assignments.
+
+**Enforcement:** Service layer on slot-class create/edit (`check_r6_volunteer_single_assignment` in `services/slot_classes/helpers.py`). Query: does the volunteer have any other active `SlotClassSectionVolunteer` row on an active slot-class whose slot is in its school's active school-year (any slot, any school)? If yes, raise `ConflictError`.
+
+### R-catalog — The class catalog is admin-managed data (M10, 2026-09-28)
+
+**Rule:** Admins (ADMIN_ROLES only) manage the class catalog in Admin → Classes. Each class has:
+- an **order** (`sequence`), used to list classes numerically
+- an optional **next class** (`next_class_id`), which is where year progression moves its children. No next class means children stay in the same class.
+- an **open for enrolment** flag
+
+**Constraints:**
+- A next class must be a different, active class, and next-class chains can't form a cycle.
+- A class **closed for enrolment** can't be added to a school, enrolled into, or moved into by editing. Only year progression, or reactivation into the child's prior class, can place a child there. This replaces the hard-coded `BLOCKED_NEW_CLASS_CODES = {"8"}`; 8th is seeded as closed.
+- A class can't be deactivated while any active school class uses it, or while another class points to it as its next class.
+
+**Enforcement:** `services/catalog/rules.py` (`assert_class_open_for_enrolment`, `validate_next_class`) and `services/catalog/write.py`.
 
 ## Scheduling integrity
 
@@ -100,13 +116,28 @@ At most 2 may be assigned; `Vol1` is required, `Vol2` is optional.
 
 ### R8 — Exactly one academic year is globally active
 
-**Rule:** At all times, exactly one `AcademicYear` row has `is_active=True`. All schools operate under this year.
+**Rule:** At all times, exactly one `AcademicYear` row has `is_active=True`. It is the newest year any school has been progressed into, and the year new schools join. Each school works in its own school-year (R8a), so schools can be on different years.
 
 **Rationale:** MAD runs a unified academic calendar. Per-school years were considered and rejected — too much divergence, too complex for reporting.
 
-**Enforcement:** Service layer on year progression transitions. The flip is atomic (old year deactivated + new year activated in one transaction).
+**Enforcement:** Service layer on year progression transitions (`services/progression/start.py`). Start makes the newest target year active when it is later than the active one; the flip is atomic (old year deactivated + new year activated in one transaction). There is no manual activate/deactivate, and Undo never flips the year back.
+
+**Progression rules (2026-10-05):**
+- Each school moves **one year ahead of its own year** (2025-26 → 2026-27, 2026-27 → 2027-28). Unselected schools stay where they are and never block anyone.
+- **One school per run** (2026-10-06): every move is chosen, previewed and confirmed on its own (the admin types the school's name to start).
+- No skipping: a school two years behind is progressed twice. Its preview warns `STILL_BEHIND`.
+- The next year must already exist; otherwise the school is blocked with `NO_NEXT_YEAR`.
+- Only the year right after the latest existing year can be created, and only an inactive year that no school or run uses can be removed.
 
 **Denormalization:** `School_academic_year` table only single row should be active
+
+### R8a — Exactly one active school-year per school (M10, 2026-09-28)
+
+**Rule:** Each school has exactly one `SchoolAcademicYear` row with `is_active=True, removed=False`. A school's year-bound data (classes, sections, slots, school volunteers, term dates, holidays) belongs to that row. A school that hasn't been progressed keeps working in its own year even after the global year flips. New schools get a school-year for the global active year on their first write.
+
+**Enforcement:**
+- DB: partial unique constraint `uniq_active_say_per_school` (migration 0034, which refuses to apply if duplicates exist).
+- Service layer: every write resolves the school-year through `get_or_create_school_academic_year`. Enrol and reactivate accept only classes that belong to the school's current school-year.
 
 ## Soft delete
 
@@ -138,6 +169,7 @@ At most 2 may be assigned; `Vol1` is required, `Vol2` is optional.
 - `RefreshTokenBlacklist` (from `simplejwt`) — internal token management, hard-delete is fine
 - Celery result rows, cache entries — infrastructure
 - `EmailRateLimit` rows — insert-only audit; no deletion mechanism in v1, may add periodic pruning later
+- `ExportLog` rows (M9) — append-only export audit; no soft-delete columns because rows are never modified or removed; no retention policy yet (see D031)
 
 
 **Note on PasswordResetToken:** Despite being short-lived data, password reset tokens follow the no-hard-delete rule via the **one-row-per-user UPDATE-in-place** pattern. A user has exactly one PasswordResetToken row that is overwritten on each new reset request. The row stays for audit; the token within is consumed or rotated.
@@ -206,15 +238,15 @@ At most 2 may be assigned; `Vol1` is required, `Vol2` is optional.
 
 ---
 
-### R17 — A converted school that reverts to a non-removed, non-converted CRM state has its full operational footprint cascade-deactivated
+### R17 — A converted school that becomes non-converted in the CRM (removed or not) has its full operational footprint cascade-deactivated
 
-**Rule:** During partner sync, if a Hasura partner row reports `crm_partner_removed=false AND converted=false` while the partner was previously `is_active=true` **and previously `converted=true`** in Session-Ops, the entire school is treated as dropped from the CRM's active pipeline: every active row across `slot_class_section_volunteer`, `slot_class_section`, `slot`, `class_section_subject`, `school_volunteer`, `child_class_section`, `child` (with a `ChildRemovalLog` per child), `child_class`, `class_section`, `school_class`, `school_academic_year`, `school_session_details`, and `school_holiday` is soft-deactivated, and `Partner.is_active` is forced to `false`.
+**Rule:** During partner sync, if a Hasura partner row reports `converted=false` (whether or not `crm_partner_removed` is also true — the dbt model sets `converted=false` whenever a school is removed; extended 2026-10-01) while the partner was previously `is_active=true` **and previously `converted=true`** in Session-Ops, the entire school is treated as dropped from the CRM's active pipeline: every active row across `slot_class_section_volunteer`, `slot_class_section`, `slot`, `class_section_subject`, `school_volunteer`, `child_class_section`, `batch_child`, `child_program`, `child_subject`, `child` (with a `ChildRemovalLog` per child), `child_class`, `class_section`, `school_class`, `school_academic_year`, `school_session_details`, and `school_holiday` is soft-deactivated, and `Partner.is_active` is forced to `false`.
 
 **Rationale:** This condition is independent of, and takes priority over, F-M1-2's existing `crm_partner_removed`-only flag flip (`Partner.is_active = not crm_partner_removed`) — under that logic alone, `removed=false` would leave (or make) the partner active. Without R17, a school that the CRM no longer counts as converted — but that was never formally marked "removed" — leaves fully-staffed, fully-scheduled ghost data in Session-Ops indefinitely.
 
 **The previous-`converted=true` requirement is load-bearing, not incidental.** An earlier version of this rule fired on "previously active" alone, without checking previous `converted` status. That broke a real production case: a partner that has *never* been converted (a plain lead) is still created with `is_active=true` on its very first sync — `is_active` is driven only by `crm_partner_removed`, unrelated to `converted`. Checking only "previously active" meant every never-converted lead matched "removed=false, converted=false" again on its *second* sync (nothing had changed), and got wrongly cascade-deactivated — and would keep re-matching on every sync after that. Requiring the partner to have previously been `converted=true` restricts R17 to an actual converted→reverted transition, never a lead that was never converted in the first place.
 
-**Enforcement:** Service layer, `services/sync/partner_deactivation.py::cascade_deactivate_school`, called from the single shared upsert path `services/sync/upsert.py::bulk_upsert_partners` (used by both the cron incremental sync and the manual "Sync now" trigger — see F-M4-9). Both the "previously active" and "previously converted" checks are snapshotted before the upsert overwrites those fields, so a brand-new partner seen for the first time never triggers this (nothing to deactivate yet, and never previously converted), and an already-cascaded partner is a no-op on repeat syncs (every cascade query filters `is_active=true`).
+**Enforcement:** Service layer, `services/sync/partner_deactivation.py::cascade_deactivate_school`, called from the single shared upsert path `services/sync/upsert.py::bulk_upsert_partners` (used by both the cron incremental sync and the manual "Sync now" trigger — see F-M4-9). Both the "previously active" and "previously converted" checks are snapshotted before the upsert overwrites those fields, so a brand-new partner seen for the first time never triggers this (nothing to deactivate yet, and never previously converted), and an already-cascaded partner is a no-op on repeat syncs (every cascade query filters `is_active=true`). The partner upsert and its cascades commit in **one transaction** (2026-10-01): if a cascade fails, the partner rows roll back too, so the next sync still sees the partner as previously converted and retries the cascade instead of losing it.
 
 **Note:** Every write is `is_active=false` + `removed=true` (or `is_active=false` alone for `Partner`, which has no `removed` field) + `deleted_at` — no hard deletes, consistent with R9. `ChildRemovalLog.removed_reason` is always written as `"other"` with `other_details="School dropped from CRM"`, satisfying R10's mandatory-reason requirement in an automated context with no human operator to ask. There is no automatic reactivation: if the partner's CRM state later reverts to `converted=true`, cascaded child records stay deactivated — confirmed as permanently out of scope, not just deferred.
 

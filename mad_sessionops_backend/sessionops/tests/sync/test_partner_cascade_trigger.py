@@ -1,7 +1,7 @@
 """
 F-M4-9: bulk_upsert_partners cascade trigger integration tests.
 
-cascade_deactivate_school() itself (all 14 tables, idempotency, rollback) is
+cascade_deactivate_school() itself (all 17 tables, idempotency, rollback) is
 tested directly in test_partner_deactivation_cascade.py. These tests cover
 only the trigger condition wired into bulk_upsert_partners: when it fires,
 when it doesn't, and that both live sync entry points (cron incremental sync
@@ -167,19 +167,73 @@ def test_skips_cascade_when_converted_true():
 
 
 @pytest.mark.django_db
-def test_skips_cascade_when_crm_partner_removed_true():
+def test_triggers_cascade_when_crm_removed_true_and_converted_false():
+    """dbt flips converted=False when a school is removed in the CRM — clear it all."""
     admin = _admin()
     sid = _active_partner(admin)
     slot = _slot_for(sid, admin)
 
     bulk_upsert_partners([_hasura_row(sid, crm_partner_removed=True)], timezone.now())
 
-    # F-M1-2's flag flip alone sets is_active=False here — but the cascade must
-    # not have fired, so the Slot underneath must remain untouched.
+    partner = Partner.all_objects.get(partner_id=sid)
+    assert partner.is_active is False
+    slot.refresh_from_db()
+    assert slot.is_active is False
+
+
+@pytest.mark.django_db
+def test_skips_cascade_when_crm_removed_true_but_still_converted():
+    """Removed-but-converted isn't a real dbt state; only the F-M1-2 flag flip applies."""
+    admin = _admin()
+    sid = _active_partner(admin)
+    slot = _slot_for(sid, admin)
+
+    bulk_upsert_partners(
+        [_hasura_row(sid, crm_partner_removed=True, converted=True)], timezone.now()
+    )
+
     partner = Partner.all_objects.get(partner_id=sid)
     assert partner.is_active is False
     slot.refresh_from_db()
     assert slot.is_active is True
+
+
+# ── Upsert and cascade commit together ───────────────────────────────────────────
+
+
+@pytest.mark.django_db
+def test_failed_cascade_rolls_back_the_partner_upsert_and_next_sync_retries_it():
+    """
+    The partner's new converted=False must not be committed without its cascade:
+    otherwise the next sync sees it as never-converted and skips the cascade for
+    good, leaving its slots/children active.
+    """
+    admin = _admin()
+    sid = _active_partner(admin)
+    slot = _slot_for(sid, admin)
+
+    with patch(
+        "sessionops.services.sync.upsert.cascade_deactivate_school",
+        side_effect=RuntimeError("simulated cascade failure"),
+    ):
+        with pytest.raises(RuntimeError):
+            bulk_upsert_partners([_hasura_row(sid, partner_name="Renamed")], timezone.now())
+
+    partner = Partner.all_objects.get(partner_id=sid)
+    assert partner.converted is True  # upsert rolled back with the cascade
+    assert partner.partner_name == f"School {sid}"
+    assert partner.is_active is True
+    slot.refresh_from_db()
+    assert slot.is_active is True
+
+    # Next sync: same CRM row, cascade now succeeds.
+    bulk_upsert_partners([_hasura_row(sid)], timezone.now())
+
+    partner.refresh_from_db()
+    assert partner.converted is False
+    assert partner.is_active is False
+    slot.refresh_from_db()
+    assert slot.is_active is False
 
 
 # ── Both live entry points share the same trigger ────────────────────────────────

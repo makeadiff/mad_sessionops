@@ -5,8 +5,17 @@ from django.utils import timezone
 from sessionops.exceptions import ConflictError, NotFound
 from sessionops.models import ChildClassSection, ClassSection, SchoolClass, SlotClassSection
 from sessionops.models.class_section import SECTION_CODES
-from sessionops.services.academic_year.queries import get_or_create_school_academic_year
+from sessionops.services.academic_year.queries import (
+    current_year_q,
+    get_or_create_school_academic_year,
+)
 from sessionops.services.sections.slug import next_default_display_name, normalize_section_slug
+
+
+def _in_current_year() -> Q:
+    """Sections in the school's own active year; legacy rows with no school-year
+    (0 in dev on 2026-09-29) stay visible rather than silently disappearing."""
+    return current_year_q() | Q(school_academic_year_id__isnull=True)
 
 
 def _with_active_children_count(class_section_id: int) -> ClassSection:
@@ -21,7 +30,9 @@ def _with_active_children_count(class_section_id: int) -> ClassSection:
 
 def list_sections_for_class(school_class_id: int) -> QuerySet:
     return (
-        ClassSection.objects.filter(school_class_id=school_class_id, is_active=True, removed=False)
+        ClassSection.objects.filter(
+            _in_current_year(), school_class_id=school_class_id, is_active=True, removed=False
+        )
         .annotate(
             active_children_count=Count(
                 "childclasssection",
@@ -126,7 +137,11 @@ def create_bucket(school_id: int, display_name: str | None, user) -> ClassSectio
     name = display_name or next_default_display_name(school_id)
     slug = normalize_section_slug(name)
 
-    if ClassSection.objects.filter(school_id=school_id, section_name=slug, removed=False).exists():
+    # Same scope as the DB slug constraint (active rows only): an archived bucket from a
+    # previous year never blocks re-using its name (F-M10-3).
+    if ClassSection.objects.filter(
+        school_id=school_id, section_name=slug, is_active=True, removed=False
+    ).exists():
         raise ConflictError(f'A bucket named "{name}" already exists in this school.')
 
     say = get_or_create_school_academic_year(school_id, user)
@@ -164,7 +179,9 @@ def edit_bucket(
     if display_name and display_name != bucket.section_display_name:
         slug = normalize_section_slug(display_name)
         if (
-            ClassSection.objects.filter(school_id=school_id, section_name=slug, removed=False)
+            ClassSection.objects.filter(
+                school_id=school_id, section_name=slug, is_active=True, removed=False
+            )
             .exclude(class_section_id=class_section_id)
             .exists()
         ):
@@ -185,7 +202,9 @@ def edit_bucket(
 
 def list_buckets_for_school(school_id: int) -> QuerySet:
     return (
-        ClassSection.objects.filter(school_id=school_id, is_active=True, removed=False)
+        ClassSection.objects.filter(
+            _in_current_year(), school_id=school_id, is_active=True, removed=False
+        )
         .annotate(
             active_children_count=Count(
                 "childclasssection",

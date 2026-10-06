@@ -15,10 +15,10 @@ from sessionops.models import (
     User,
 )
 from sessionops.schemas.children import ChildEditIn
+from sessionops.services.catalog.rules import assert_class_open_for_enrolment
 from sessionops.services.children.enroll import MAX_CHILDREN_PER_SECTION
 from sessionops.services.rbac.scope import get_school_or_403
 from sessionops.services.structure.bucket_children import assert_bucket_not_over_volunteered
-from sessionops.services.structure.queries import assert_class_not_blocked_for_assignment
 
 _DEMOGRAPHIC_FIELDS = [
     "first_name",
@@ -82,13 +82,11 @@ def edit_child(child_id: int, payload: ChildEditIn, user: User):
                 except SchoolClass.DoesNotExist:
                     raise NotFound(f"School class {payload.school_class_id} not found.")
 
-                # Moving a child INTO a blocked class (e.g. 8) directly is not
-                # allowed — only year-end progression can put them there. A child
-                # already sitting in that class is unaffected: this branch only
-                # runs when the target class differs from current_cc above.
-                assert_class_not_blocked_for_assignment(
-                    new_school_class.class_id.class_code, new_school_class.class_id.class_name
-                )
+                # Moving a child INTO a class closed for enrolment (e.g. 8th) directly
+                # is not allowed — only year-end progression can put them there. A child
+                # already sitting in that class is unaffected: this branch only runs
+                # when the target class differs from current_cc above.
+                assert_class_open_for_enrolment(new_school_class.class_id)
 
                 now = timezone.now()
                 if current_cc:

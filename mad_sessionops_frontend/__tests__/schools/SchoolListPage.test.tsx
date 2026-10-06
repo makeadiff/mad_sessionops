@@ -24,6 +24,13 @@ vi.mock("@/lib/api/services/schools.service", async (importOriginal) => {
   return { ...actual, fetchSchools: vi.fn() };
 });
 
+vi.mock("@/lib/api/services/exports.service", () => ({
+  exportSchoolsSummary: vi.fn().mockResolvedValue(undefined),
+  exportAllChildren: vi.fn().mockResolvedValue(undefined),
+  exportAllVolunteers: vi.fn().mockResolvedValue(undefined),
+  exportGapReport: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock("next/navigation", () => ({
   useRouter: () => ({
     push: mockRouterPush,
@@ -36,6 +43,12 @@ vi.mock("next/navigation", () => ({
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
 import { fetchSchools } from "@/lib/api/services/schools.service";
+import {
+  exportAllChildren,
+  exportAllVolunteers,
+  exportGapReport,
+  exportSchoolsSummary,
+} from "@/lib/api/services/exports.service";
 
 const MOCK_SUMMARY = {
   totalSchools: 2,
@@ -416,5 +429,132 @@ describe("SchoolListPage — F-M1-4", () => {
     await userEvent.keyboard(" ");
 
     expect(mockRouterPush).toHaveBeenCalledWith("/schools/612");
+  });
+
+  // ── F-M9-5 Export ────────────────────────────────────────────────────────────
+
+  it("test_schools_export_passes_debounced_search", async () => {
+    vi.mocked(fetchSchools).mockResolvedValue({
+      schools: MOCK_SCHOOLS,
+      summary: MOCK_SUMMARY,
+      scopeWarning: null,
+    });
+
+    renderWithProvider(<SchoolListPage userName="Ipshita Das" />);
+    await waitFor(() => {
+      expect(screen.getByText("Govt. High School Shaikpet")).toBeInTheDocument();
+    });
+
+    await userEvent.type(screen.getByPlaceholderText(/search by school name/i), "Shaikpet");
+    await waitFor(
+      () => {
+        expect(screen.queryByText("Municipal School Jubilee Hills")).not.toBeInTheDocument();
+      },
+      { timeout: 1000 }
+    );
+
+    // Two or more options → the Export button opens a menu.
+    await userEvent.click(screen.getByRole("button", { name: /^export$/i }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Schools summary" }));
+
+    await waitFor(() => expect(exportSchoolsSummary).toHaveBeenCalledWith("Shaikpet"));
+  });
+
+  it("test_schools_export_menu_all_children", async () => {
+    vi.mocked(fetchSchools).mockResolvedValue({
+      schools: MOCK_SCHOOLS,
+      summary: MOCK_SUMMARY,
+      scopeWarning: null,
+    });
+
+    renderWithProvider(<SchoolListPage userName="Ipshita Das" />);
+    await waitFor(() => {
+      expect(screen.getByText("Govt. High School Shaikpet")).toBeInTheDocument();
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: /^export$/i }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "All children" }));
+
+    await waitFor(() => expect(exportAllChildren).toHaveBeenCalledWith(""));
+    expect(exportSchoolsSummary).not.toHaveBeenCalled();
+  });
+
+  it("test_schools_export_menu_all_volunteers", async () => {
+    vi.mocked(fetchSchools).mockResolvedValue({
+      schools: MOCK_SCHOOLS,
+      summary: MOCK_SUMMARY,
+      scopeWarning: null,
+    });
+
+    renderWithProvider(<SchoolListPage userName="Ipshita Das" />);
+    await waitFor(() => {
+      expect(screen.getByText("Govt. High School Shaikpet")).toBeInTheDocument();
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: /^export$/i }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "All volunteers" }));
+
+    await waitFor(() => expect(exportAllVolunteers).toHaveBeenCalledWith(""));
+  });
+
+  it("test_schools_export_menu_lists_all_exports_and_runs_gap_report", async () => {
+    vi.mocked(fetchSchools).mockResolvedValue({
+      schools: MOCK_SCHOOLS,
+      summary: MOCK_SUMMARY,
+      scopeWarning: null,
+    });
+
+    renderWithProvider(<SchoolListPage userName="Ipshita Das" />);
+    await waitFor(() => {
+      expect(screen.getByText("Govt. High School Shaikpet")).toBeInTheDocument();
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: /^export$/i }));
+    const items = await screen.findAllByRole("menuitem");
+    expect(items.map((i) => i.textContent)).toEqual([
+      "Schools summary",
+      "All children",
+      "All volunteers",
+      "Gap report",
+    ]);
+
+    await userEvent.click(screen.getByRole("menuitem", { name: "Gap report" }));
+
+    await waitFor(() => expect(exportGapReport).toHaveBeenCalledWith(""));
+  });
+
+  // ── M10 F-M10-5 progression banner ───────────────────────────────────────────
+
+  it("test_progressing_banner_shows_count_and_dismisses", async () => {
+    vi.mocked(fetchSchools).mockResolvedValue({
+      schools: MOCK_SCHOOLS,
+      summary: MOCK_SUMMARY,
+      scopeWarning: null,
+      progressingCount: 2,
+    });
+
+    renderWithProvider(<SchoolListPage userName="Ipshita Das" />);
+
+    expect(
+      await screen.findByText(/2 of your schools are being moved to the next academic year/)
+    ).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /close/i }));
+    await waitFor(() =>
+      expect(screen.queryByText(/being moved to the next academic year/)).not.toBeInTheDocument()
+    );
+  });
+
+  it("test_no_progressing_banner_when_count_zero", async () => {
+    vi.mocked(fetchSchools).mockResolvedValue({
+      schools: MOCK_SCHOOLS,
+      summary: MOCK_SUMMARY,
+      scopeWarning: null,
+      progressingCount: 0,
+    });
+
+    renderWithProvider(<SchoolListPage userName="Ipshita Das" />);
+
+    await screen.findByText("Govt. High School Shaikpet");
+    expect(screen.queryByText(/being moved to the next academic year/)).not.toBeInTheDocument();
   });
 });
